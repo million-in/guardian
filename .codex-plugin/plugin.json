@@ -1,6 +1,6 @@
 {
   "name": "code-guardian",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "description": "Pre-coding discipline and post-coding verification for agent-generated code using Guardian.",
   "author": {
     "name": "Guardian"

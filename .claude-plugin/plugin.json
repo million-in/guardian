@@ -1,6 +1,6 @@
 {
   "name": "code-guardian",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "description": "Apply the Guardian workflow before coding and verify every changed file after coding.",
   "author": {
     "name": "Guardian"
