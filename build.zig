@@ -60,13 +60,20 @@ pub fn build(b: *std.Build) void {
     e2e_mcp.setCwd(b.path("."));
     e2e_mcp.step.dependOn(b.getInstallStep());
 
+    const e2e_release = b.addSystemCommand(&.{"bash"});
+    e2e_release.addFileArg(b.path("scripts/e2e-release-package.sh"));
+    e2e_release.setCwd(b.path("."));
+    e2e_release.step.dependOn(b.getInstallStep());
+
     const e2e_step = b.step("e2e", "Run CLI and MCP end-to-end checks");
     e2e_step.dependOn(&e2e_cli.step);
     e2e_step.dependOn(&e2e_mcp.step);
+    e2e_step.dependOn(&e2e_release.step);
 
     const ci_step = b.step("ci", "Run formatting, unit tests, and end-to-end checks");
     ci_step.dependOn(&fmt.step);
     ci_step.dependOn(&run_tests.step);
     ci_step.dependOn(&e2e_cli.step);
     ci_step.dependOn(&e2e_mcp.step);
+    ci_step.dependOn(&e2e_release.step);
 }

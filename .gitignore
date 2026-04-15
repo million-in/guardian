@@ -6,8 +6,8 @@ zig-out/
 .DS_Store
 
 # Local user config (machine-specific paths)
-.claude/settings.local.json
-.codex/config.toml
+.claude/
+.codex/
 .mcp.json
 
 # Editor

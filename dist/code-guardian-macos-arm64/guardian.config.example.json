@@ -1,0 +1,102 @@
+{
+  "limits": {
+    "max_nesting": 3,
+    "cyclomatic_complexity_warn": 6,
+    "cyclomatic_complexity_error": 8,
+    "max_imports": 15,
+    "max_functions_per_file": 16,
+    "max_function_lines": 80,
+    "max_line_length": 120,
+    "max_excerpt_lines": 12,
+    "max_excerpt_chars": 1600
+  },
+  "scan": {
+    "extensions": [".go", ".ts", ".tsx", ".py", ".zig"],
+    "ignored_dirs": [".git", ".zig-cache", "zig-out", "node_modules", "vendor", "dist", "build", "__pycache__"]
+  },
+  "go": {
+    "ban_generics": true,
+    "surface_scope": "public_only",
+    "generic_scope": "public_only",
+    "extra_banned_patterns": [
+      {
+        "pattern": "unsafe.Pointer",
+        "severity": "warn",
+        "message": "unsafe.Pointer should be rare and documented"
+      }
+    ]
+  },
+  "typescript": {
+    "extra_banned_patterns": [
+      {
+        "pattern": "console.log",
+        "severity": "warn",
+        "message": "remove console logging before submission"
+      }
+    ]
+  },
+  "python": {
+    "warn_missing_return_annotation": true
+  },
+  "zig": {
+    "warn_anytype": true,
+    "anytype_scope": "public_only",
+    "cast_scope": "public_only",
+    "extra_banned_patterns": [
+      {
+        "pattern": "page_allocator",
+        "severity": "warn",
+        "message": "page_allocator should not be used in production hot paths"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "path_prefixes": ["src/analyzers/", "src/protocol/"],
+      "limits": {
+        "max_functions_per_file": 30,
+        "max_function_lines": 120,
+        "max_line_length": 160,
+        "cyclomatic_complexity_warn": 10,
+        "cyclomatic_complexity_error": 14
+      }
+    },
+    {
+      "path_suffixes": ["src/types.zig"],
+      "limits": {
+        "max_nesting": 5,
+        "max_function_lines": 180,
+        "cyclomatic_complexity_warn": 24,
+        "cyclomatic_complexity_error": 32
+      }
+    },
+    {
+      "path_suffixes": ["src/config.zig"],
+      "limits": {
+        "max_functions_per_file": 30,
+        "cyclomatic_complexity_warn": 8,
+        "cyclomatic_complexity_error": 12,
+        "max_nesting": 4
+      }
+    },
+    {
+      "path_suffixes": ["src/server.zig", "src/reporting.zig"],
+      "limits": {
+        "max_functions_per_file": 24
+      }
+    },
+    {
+      "roles": ["test", "fixture", "sample"],
+      "limits": {
+        "max_function_lines": 90,
+        "max_line_length": 160
+      },
+      "go": {
+        "ban_generics": false
+      },
+      "zig": {
+        "warn_anytype": false
+      }
+    }
+  ]
+}

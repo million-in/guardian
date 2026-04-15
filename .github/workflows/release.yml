@@ -56,30 +56,7 @@ jobs:
         run: nix develop -c zig build -Doptimize=ReleaseFast
 
       - name: Package release archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          arch="$(uname -m)"
-          case "$RUNNER_OS" in
-            Linux) platform="linux-$arch" ;;
-            macOS) platform="macos-$arch" ;;
-            *) echo "unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
-          esac
-
-          archive_root="dist/code-guardian-$platform"
-          mkdir -p "$archive_root/bin"
-          cp zig-out/bin/gd "$archive_root/bin/"
-          cp zig-out/bin/guardian-mcp "$archive_root/bin/"
-          cp README.md guardian.config.example.json AGENTS.md .mcp.json "$archive_root/"
-          cp -R .claude "$archive_root/.claude"
-          cp -R .codex "$archive_root/.codex"
-          cp -R .codex-plugin "$archive_root/.codex-plugin"
-          cp -R .claude-plugin "$archive_root/.claude-plugin"
-          cp -R commands "$archive_root/commands"
-          cp -R skill "$archive_root/skill"
-          cp -R skills "$archive_root/skills"
-
-          tar -czf "code-guardian-$platform.tar.gz" -C dist "code-guardian-$platform"
+        run: bash ./scripts/package-release.sh
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4

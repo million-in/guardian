@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "guardian": {
+      "command": "./bin/guardian-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
