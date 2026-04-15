@@ -1,4 +1,4 @@
---
+---
 name: code-guardian
 description: >
 Enforces strict engineering discipline on all code generation and modification.
