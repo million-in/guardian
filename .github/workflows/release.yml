@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-tag-target:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag commit is on main
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+  build-artifacts:
+    needs: verify-tag-target
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Run verification suite
+        run: nix develop -c zig build ci
+
+      - name: Build release binaries
+        run: nix develop -c zig build -Doptimize=ReleaseFast
+
+      - name: Package release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          case "$RUNNER_OS" in
+            Linux) platform="linux-$arch" ;;
+            macOS) platform="macos-$arch" ;;
+            *) echo "unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+
+          archive_root="dist/code-guardian-$platform"
+          mkdir -p "$archive_root/bin"
+          cp zig-out/bin/gd "$archive_root/bin/"
+          cp zig-out/bin/guardian-mcp "$archive_root/bin/"
+          cp README.md guardian.config.example.json "$archive_root/"
+          cp -R .codex-plugin "$archive_root/.codex-plugin"
+          cp -R .claude-plugin "$archive_root/.claude-plugin"
+          cp -R commands "$archive_root/commands"
+          cp -R skill "$archive_root/skill"
+
+          tar -czf "code-guardian-$platform.tar.gz" -C dist "code-guardian-$platform"
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: code-guardian-*.tar.gz
+
+  publish-release:
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download built archives
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/**/*.tar.gz
+          generate_release_notes: true

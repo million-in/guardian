@@ -1,0 +1,10 @@
+{
+  "name": "code-guardian",
+  "version": "0.0.0",
+  "description": "Apply the Guardian workflow before coding and verify every changed file after coding.",
+  "author": {
+    "name": "Guardian"
+  },
+  "license": "MIT",
+  "commands": "./commands"
+}
