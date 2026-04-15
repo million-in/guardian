@@ -1,4 +1,4 @@
-{
+
   "name": "code-guardian",
   "version": "0.0.0",
   "description": "Apply the Guardian workflow before coding and verify every changed file after coding.",
@@ -6,5 +6,11 @@
     "name": "Guardian"
   },
   "license": "MIT",
-  "commands": "./commands"
+  "commands": "./commands",
+  "mcpServers": {
+    "guardian": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/zig-out/bin/guardian-mcp",
+      "args": []
+    }
+  }
 }

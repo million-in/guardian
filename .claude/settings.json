@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "guardian": {
+      "command": "./zig-out/bin/guardian-mcp",
+      "args": []
+    }
+  }
+}

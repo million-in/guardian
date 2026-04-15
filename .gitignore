@@ -5,6 +5,11 @@ zig-out/
 # macOS
 .DS_Store
 
+# Local user config (machine-specific paths)
+.claude/settings.local.json
+.codex/config.toml
+.mcp.json
+
 # Editor
 *.swp
 *.swo

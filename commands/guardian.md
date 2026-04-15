@@ -29,4 +29,4 @@ Use this command on any task that writes, edits, debugs, reviews, or refactors c
 
 ## Contract
 
-Use the full engineering contract in `skill/SKILL.md` as the source of truth.
+Use the full engineering contract in `skills/code-guardian/SKILL.md` as the source of truth.

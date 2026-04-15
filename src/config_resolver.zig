@@ -51,3 +51,54 @@ pub const Resolver = struct {
         return self.entries.items[idx].loaded.value;
     }
 };
+
+const testing = std.testing;
+
+test "config resolver: explicit absolute config path can be reused across files" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "guardian.json",
+        .data =
+        \\{
+        \\  "go": {
+        \\    "ban_generics": false
+        \\  }
+        \\}
+        ,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.go",
+        .data =
+        \\func Map[T any](items []T) []T {
+        \\    return items
+        \\}
+        ,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.go",
+        .data =
+        \\func Reduce[T any](items []T) []T {
+        \\    return items
+        \\}
+        ,
+    });
+
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    defer testing.allocator.free(absolute_config);
+    const file_a = try tmp.dir.realpathAlloc(testing.allocator, "a.go");
+    defer testing.allocator.free(file_a);
+    const file_b = try tmp.dir.realpathAlloc(testing.allocator, "b.go");
+    defer testing.allocator.free(file_b);
+
+    var resolver = Resolver.init(testing.allocator, absolute_config);
+    defer resolver.deinit();
+
+    const cfg_a = try resolver.resolve(file_a);
+    const cfg_b = try resolver.resolve(file_b);
+
+    try testing.expectEqual(@as(usize, 1), resolver.entries.items.len);
+    try testing.expect(!cfg_a.go.ban_generics);
+    try testing.expect(!cfg_b.go.ban_generics);
+}

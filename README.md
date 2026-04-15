@@ -74,17 +74,37 @@ All tools accept an optional `config_path` parameter to override config discover
 
 ### Integration with Claude Code
 
-Add Guardian as an MCP server in your Claude Code settings:
+Guardian works with Claude Code in two ways:
+
+Project-scoped Claude MCP config:
 
 ```json
 {
   "mcpServers": {
-    "code-guardian": {
-      "command": "/absolute/path/to/zig-out/bin/guardian-mcp"
+    "guardian": {
+      "command": "./zig-out/bin/guardian-mcp",
+      "args": []
     }
   }
 }
 ```
+
+This repo ships that config in [.mcp.json](./.mcp.json) for `claude mcp` commands.
+
+Per-project settings file:
+
+```json
+{
+  "mcpServers": {
+    "guardian": {
+      "command": "./zig-out/bin/guardian-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+This repo also ships the same server in [.claude/settings.json](./.claude/settings.json).
 
 The companion skill definition in `skill/SKILL.md` instructs the agent to call the `analyze` tool on every code change and reject results containing `error`-severity violations.
 

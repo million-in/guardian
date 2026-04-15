@@ -333,3 +333,50 @@ test "app: batch resolved configs support mixed monorepos" {
         }
     }
 }
+
+test "app: batch resolved explicit absolute config path can be reused" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "guardian.json",
+        .data =
+        \\{
+        \\  "go": {
+        \\    "ban_generics": false
+        \\  }
+        \\}
+        ,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.go",
+        .data =
+        \\func Map[T any](items []T) []T {
+        \\    return items
+        \\}
+        ,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.go",
+        .data =
+        \\func Reduce[T any](items []T) []T {
+        \\    return items
+        \\}
+        ,
+    });
+
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    defer testing.allocator.free(absolute_config);
+    const file_a = try tmp.dir.realpathAlloc(testing.allocator, "a.go");
+    defer testing.allocator.free(file_a);
+    const file_b = try tmp.dir.realpathAlloc(testing.allocator, "b.go");
+    defer testing.allocator.free(file_b);
+
+    const paths = [_][]const u8{ file_a, file_b };
+    var batch = try analyzeFilePathsResolved(testing.allocator, &paths, absolute_config);
+    defer batch.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 2), batch.file_count);
+    try testing.expectEqual(@as(u32, 0), batch.error_count);
+    try testing.expect(batch.pass);
+}

@@ -75,11 +75,6 @@ const config_names = [_][]const u8{
 const max_config_bytes = 1024 * 1024;
 
 fn resolveExplicitConfigPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-    if (std.fs.path.isAbsolute(path)) {
-        try std.fs.accessAbsolute(path, .{});
-        return path;
-    }
-
     return try std.fs.realpathAlloc(allocator, path);
 }
 
@@ -206,4 +201,23 @@ test "config loader: resolve cache key falls back to default sentinel" {
     defer testing.allocator.free(key);
 
     try testing.expect(isDefaultCacheKey(key));
+}
+
+test "config loader: resolve cache key duplicates explicit absolute config path" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "guardian.json",
+        .data = "{}\n",
+    });
+
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    defer testing.allocator.free(absolute_config);
+
+    const key = try resolveCacheKey(testing.allocator, null, absolute_config);
+    defer testing.allocator.free(key);
+
+    try testing.expectEqualStrings(absolute_config, key);
+    try testing.expect(key.ptr != absolute_config.ptr);
 }

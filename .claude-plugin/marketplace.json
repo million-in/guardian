@@ -1,0 +1,14 @@
+{
+  "name": "guardian-local",
+  "plugins": [
+    {
+      "name": "code-guardian",
+      "source": "./",
+      "description": "Static analysis engine enforcing engineering discipline across polyglot codebases via MCP.",
+      "version": "0.0.0"
+    }
+  ],
+  "owner": {
+    "name": "Guardian"
+  }
+}

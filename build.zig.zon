@@ -71,16 +71,21 @@
     // the build root itself.
     // A directory listed here means that all files within, recursively, are included.
     .paths = .{
+        "AGENTS.md",
         "build.zig",
         "build.zig.zon",
         "README.md",
         "flake.nix",
         "guardian.config.example.json",
+        ".mcp.json",
+        ".claude",
         "src",
         "scripts",
         "samples",
         "skill",
+        "skills",
         "commands",
+        ".codex",
         ".codex-plugin",
         ".claude-plugin",
     },
