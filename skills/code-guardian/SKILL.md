@@ -1,13 +1,12 @@
 ---
 name: code-guardian
 description: >
-Enforces strict engineering discipline on all code generation and modification.
-Trigger this skill on EVERY code-related task: writing new code, editing existing code,
-reviewing code, generating tests, refactoring, debugging, or any task that touches
-.go, .ts, .py, or .zig files. This skill defines hard constraints the agent MUST
-follow before presenting any code to the user. If you are about to write or change
-code, READ THIS SKILL FIRST. No exceptions.
-
+  Enforces strict engineering discipline on all code generation and modification.
+  Trigger this skill on EVERY code-related task: writing new code, editing existing code,
+  reviewing code, generating tests, refactoring, debugging, or any task that touches
+  .go, .ts, .py, or .zig files. This skill defines hard constraints the agent MUST
+  follow before presenting any code to the user. If you are about to write or change
+  code, READ THIS SKILL FIRST. No exceptions.
 ---
 
 # Code Guardian — Engineering Contract
