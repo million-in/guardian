@@ -649,6 +649,33 @@ test "protocol: analyze_folder supports explicit absolute config path via tools/
     try testing.expect(std.mem.indexOf(u8, response.?, "PASS") != null);
 }
 
+test "protocol: analyze request surfaces design rule ids" {
+    const request =
+        \\{
+        \\  "jsonrpc":"2.0",
+        \\  "id":"design-1",
+        \\  "method":"tools/call",
+        \\  "params":{
+        \\    "name":"analyze",
+        \\    "arguments":{
+        \\      "file_path":"design.go",
+        \\      "source":"func Build(a int, b int, c int, d int, e int, f int, g int) int {\n    return run(pkg.Load(), repo.Fetch(), service.Call(), config.Read(), metrics.Emit(), clock.Now(), audit.Track(), cache.Hit())\n}"
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const framed_request = try jsonrpc.frameMessage(testing.allocator, request);
+    defer testing.allocator.free(framed_request);
+
+    const response = try processInput(testing.allocator, framed_request);
+    try testing.expect(response != null);
+    defer testing.allocator.free(response.?);
+
+    try testing.expect(std.mem.indexOf(u8, response.?, "too_many_arguments") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "hidden_coupling") != null);
+}
+
 fn buildAnalyzeFolderRequest(allocator: std.mem.Allocator, folder_path: []const u8) ![]u8 {
     var buf = std.array_list.Managed(u8).init(allocator);
     const writer = buf.writer();

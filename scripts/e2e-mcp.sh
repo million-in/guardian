@@ -12,6 +12,11 @@ absolute_config="$ROOT/guardian.config.example.json"
 jq -e '.result.pass == false' "$tmp_dir/analyze.json" >/dev/null
 jq -e 'any(.result.violations[]; .rule == "banned_type")' "$tmp_dir/analyze.json" >/dev/null
 
+./scripts/guardian-check.sh analyze samples/go_design_bad.go > "$tmp_dir/design.json"
+jq -e '.result.pass == false' "$tmp_dir/design.json" >/dev/null
+jq -e 'any(.result.violations[]; .rule == "too_many_arguments")' "$tmp_dir/design.json" >/dev/null
+jq -e 'any(.result.violations[]; .rule == "hidden_coupling")' "$tmp_dir/design.json" >/dev/null
+
 ./scripts/guardian-check.sh batch src/types.zig src/server.zig --config "$absolute_config" > "$tmp_dir/batch.json"
 jq -e '.result.file_count == 2 and .result.pass == true' "$tmp_dir/batch.json" >/dev/null
 

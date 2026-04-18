@@ -4,6 +4,7 @@ These files are test fixtures for the guardian MCP engine.
 
 - `go_clean.go`: should pass or produce no `error` violations.
 - `go_bad.go`: should fail on banned Go surface types, unchecked assertion, and deep nesting.
+- `go_design_bad.go`: should fail on design rules such as too many arguments, too many fields, and hidden coupling.
 - `ts_clean.ts`: should pass or produce no `error` violations.
 - `ts_bad.ts`: should fail on `any`, `as any`, `@ts-ignore`, and deep nesting.
 - `py_clean.py`: should pass or produce no `error` violations.

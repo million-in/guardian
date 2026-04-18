@@ -22,6 +22,10 @@ pub const Limits = struct {
     max_imports: u32 = 15,
     max_functions_per_file: u32 = 15,
     max_function_lines: u32 = 50,
+    max_function_arguments: u32 = 3,
+    max_type_fields: u32 = 10,
+    max_hidden_touch_excess: u32 = 0,
+    max_lifecycle_flags: u32 = 2,
     max_line_length: u32 = 120,
     max_excerpt_lines: u32 = 12,
     max_excerpt_chars: u32 = 1600,
@@ -34,6 +38,10 @@ pub const LimitsPatch = struct {
     max_imports: ?u32 = null,
     max_functions_per_file: ?u32 = null,
     max_function_lines: ?u32 = null,
+    max_function_arguments: ?u32 = null,
+    max_type_fields: ?u32 = null,
+    max_hidden_touch_excess: ?u32 = null,
+    max_lifecycle_flags: ?u32 = null,
     max_line_length: ?u32 = null,
     max_excerpt_lines: ?u32 = null,
     max_excerpt_chars: ?u32 = null,
@@ -237,6 +245,10 @@ fn applyLimitsPatch(target: *Limits, patch: LimitsPatch) void {
         "max_imports",
         "max_functions_per_file",
         "max_function_lines",
+        "max_function_arguments",
+        "max_type_fields",
+        "max_hidden_touch_excess",
+        "max_lifecycle_flags",
         "max_line_length",
         "max_excerpt_lines",
         "max_excerpt_chars",
@@ -322,6 +334,7 @@ test "config schema: applies path and role overrides" {
                 .limits = .{
                     .max_function_lines = 120,
                     .max_line_length = 160,
+                    .max_function_arguments = 8,
                 },
             },
             .{
@@ -336,6 +349,7 @@ test "config schema: applies path and role overrides" {
     const analyzer_cfg = base.resolvedForPath("/repo/src/analyzers/type_check.zig");
     try testing.expectEqual(@as(u32, 120), analyzer_cfg.limits.max_function_lines);
     try testing.expectEqual(@as(u32, 160), analyzer_cfg.limits.max_line_length);
+    try testing.expectEqual(@as(u32, 8), analyzer_cfg.limits.max_function_arguments);
 
     const test_cfg = base.resolvedForPath("/repo/pkg/user_test.go");
     try testing.expect(!test_cfg.go.ban_generics);

@@ -17,6 +17,10 @@ grep -F "banned_type" "$tmp_dir/analyze.pretty" >/dev/null
 grep -F "interface{}" "$tmp_dir/analyze.pretty" >/dev/null
 grep -F "$red" "$tmp_dir/analyze.pretty" >/dev/null
 
+./zig-out/bin/gd analyze samples/go_design_bad.go > "$tmp_dir/design.pretty"
+grep -F "too_many_arguments" "$tmp_dir/design.pretty" >/dev/null
+grep -F "hidden_coupling" "$tmp_dir/design.pretty" >/dev/null
+
 ./zig-out/bin/gd batch src/types.zig src/server.zig --json --config "$absolute_config" > "$tmp_dir/batch.json"
 jq -e '.file_count == 2 and .pass == true' "$tmp_dir/batch.json" >/dev/null
 

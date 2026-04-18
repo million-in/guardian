@@ -380,3 +380,60 @@ test "app: batch resolved explicit absolute config path can be reused" {
     try testing.expectEqual(@as(u32, 0), batch.error_count);
     try testing.expect(batch.pass);
 }
+
+test "app: explicit design limits apply through resolved configs" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "guardian.json",
+        .data =
+        \\{
+        \\  "limits": {
+        \\    "max_function_arguments": 1,
+        \\    "max_type_fields": 1,
+        \\    "max_hidden_touch_excess": 0
+        \\  }
+        \\}
+        ,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "design.go",
+        .data =
+        \\package sample
+        \\
+        \\type Session struct {
+        \\    Active bool
+        \\    Ready bool
+        \\}
+        \\
+        \\func Build(a int, b int) int {
+        \\    return run(pkg.Load(), repo.Fetch(), service.Call())
+        \\}
+        ,
+    });
+
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    defer testing.allocator.free(absolute_config);
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "design.go");
+    defer testing.allocator.free(file_path);
+
+    const paths = [_][]const u8{file_path};
+    var batch = try analyzeFilePathsResolved(testing.allocator, &paths, absolute_config);
+    defer batch.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 1), batch.file_count);
+    try testing.expect(batch.results[0].error_count >= 2);
+    try testing.expect(resultHasRule(batch.results[0], .too_many_arguments));
+    try testing.expect(resultHasRule(batch.results[0], .too_many_fields));
+    try testing.expect(resultHasRule(batch.results[0], .hidden_coupling));
+}
+
+fn resultHasRule(result: AnalysisResult, rule: types.Rule) bool {
+    for (result.violations) |violation| {
+        if (violation.rule == rule) {
+            return true;
+        }
+    }
+    return false;
+}

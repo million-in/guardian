@@ -6,13 +6,26 @@
     "max_imports": 15,
     "max_functions_per_file": 16,
     "max_function_lines": 80,
+    "max_function_arguments": 3,
+    "max_type_fields": 12,
+    "max_hidden_touch_excess": 2,
+    "max_lifecycle_flags": 2,
     "max_line_length": 120,
     "max_excerpt_lines": 12,
     "max_excerpt_chars": 1600
   },
   "scan": {
     "extensions": [".go", ".ts", ".tsx", ".py", ".zig"],
-    "ignored_dirs": [".git", ".zig-cache", "zig-out", "node_modules", "vendor", "dist", "build", "__pycache__"]
+    "ignored_dirs": [
+      ".git",
+      ".zig-cache",
+      "zig-out",
+      "node_modules",
+      "vendor",
+      "dist",
+      "build",
+      "__pycache__"
+    ]
   },
   "go": {
     "ban_generics": true,
@@ -56,6 +69,7 @@
       "limits": {
         "max_functions_per_file": 30,
         "max_function_lines": 120,
+        "max_function_arguments": 8,
         "max_line_length": 160,
         "cyclomatic_complexity_warn": 10,
         "cyclomatic_complexity_error": 14
@@ -66,6 +80,7 @@
       "limits": {
         "max_nesting": 5,
         "max_function_lines": 180,
+        "max_type_fields": 16,
         "cyclomatic_complexity_warn": 24,
         "cyclomatic_complexity_error": 32
       }
@@ -74,9 +89,30 @@
       "path_suffixes": ["src/config.zig"],
       "limits": {
         "max_functions_per_file": 30,
+        "max_function_arguments": 8,
         "cyclomatic_complexity_warn": 8,
         "cyclomatic_complexity_error": 12,
         "max_nesting": 4
+      }
+    },
+    {
+      "path_suffixes": ["src/config_schema.zig"],
+      "limits": {
+        "max_type_fields": 16,
+        "max_hidden_touch_excess": 4
+      }
+    },
+    {
+      "path_suffixes": ["src/symbol_model.zig"],
+      "limits": {
+        "max_functions_per_file": 100,
+        "max_function_arguments": 10,
+        "max_type_fields": 16,
+        "max_hidden_touch_excess": 4,
+        "max_nesting": 6,
+        "cyclomatic_complexity_warn": 10,
+        "cyclomatic_complexity_error": 14,
+        "max_line_length": 160
       }
     },
     {

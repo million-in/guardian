@@ -5,6 +5,7 @@ const nesting = @import("analyzers/nesting.zig");
 const complexity = @import("analyzers/complexity.zig");
 const type_check = @import("analyzers/type_check.zig");
 const cohesion = @import("analyzers/cohesion.zig");
+const design = @import("analyzers/design.zig");
 const formatting = @import("analyzers/formatting.zig");
 
 const Language = types.Language;
@@ -61,6 +62,11 @@ pub fn analyze(
     const cohesion_v = try cohesion.analyzeCohesion(allocator, masked_lines, lang, cfg);
     try all.appendSlice(cohesion_v);
     allocator.free(cohesion_v);
+
+    // ── Cross-language design rules ──
+    const design_v = try design.analyzeDesign(allocator, raw_lines, masked_lines, lang, cfg);
+    try all.appendSlice(design_v);
+    allocator.free(design_v);
 
     // ── Formatting ──
     const fmt_v = try formatting.analyzeFormatting(allocator, raw_lines, lang, cfg);

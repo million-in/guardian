@@ -3,6 +3,7 @@
 A static analysis engine for enforcing engineering discipline across polyglot codebases. Written in Zig, Guardian ships as both a standalone CLI (`gd`) and an MCP (Model Context Protocol) server (`guardian-mcp`) that AI coding assistants can call to validate code before presenting it to the user.
 
 Guardian analyzes **Go**, **TypeScript**, **Python**, and **Zig** source files against a configurable set of rules covering nesting depth, cyclomatic complexity, type safety, cohesion, and formatting.
+It also reports cross-language design smells such as oversized signatures, oversized state containers, hidden coupling, temporal coupling, boolean state machines, and ambiguous lifecycle ownership.
 
 ## Requirements
 
@@ -180,6 +181,15 @@ Scope controls (`public_only` or `all`) determine whether rules apply to interna
 - **Function count**: `error` when file exceeds `max_functions_per_file` (default: 15)
 - **Function length**: `warn` when any function exceeds `max_function_lines` (default: 50)
 
+### Design Rules
+
+- **Too many arguments**: `error` when a function or method exceeds `max_function_arguments` (default: 6)
+- **Too many fields**: `error` when a struct, class, interface, or object-shape type exceeds `max_type_fields` (default: 10)
+- **Hidden coupling**: `warn` when a function touches more external dependencies than its declared inputs plus `max_hidden_touch_excess` (default excess: 0)
+- **Temporal coupling**: `error` when lifecycle methods depend on call order enforced only by boolean flags or ad hoc checks
+- **Boolean state machine**: `error` when a type models lifecycle with more than `max_lifecycle_flags` booleans instead of one explicit state
+- **Ambiguous lifecycle ownership**: `error` when multiple functions plausibly own the same cleanup responsibility
+
 ### Formatting
 
 - **Line length**: `warn` when a line exceeds `max_line_length` (default: 120)
@@ -202,6 +212,10 @@ See `guardian.config.example.json` for a complete reference. Key sections:
     "max_imports": 15,
     "max_functions_per_file": 16,
     "max_function_lines": 80,
+    "max_function_arguments": 7,
+    "max_type_fields": 12,
+    "max_hidden_touch_excess": 2,
+    "max_lifecycle_flags": 2,
     "max_line_length": 120,
     "max_excerpt_lines": 12,
     "max_excerpt_chars": 1600
