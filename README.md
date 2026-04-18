@@ -36,7 +36,7 @@ This produces two binaries in `zig-out/bin/`:
 
 - Build the binaries with `zig build`
 - Use `./zig-out/bin/gd` as the CLI
-- Use [.claude/settings.json](./.claude/settings.json) for a repo-local Claude Code MCP config
+- Use [.claude/settings.json](./.claude/settings.json) for a repo-local Claude Code MCP config, geez forgot to commit this template sorry)
 - Use [plugin.mcp.json](./plugin.mcp.json) when installing the Codex plugin locally so the plugin can register Guardian as an MCP server
 
 ### Release Archive Install
