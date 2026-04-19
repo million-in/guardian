@@ -26,6 +26,7 @@ package_root="$extract_root/code-guardian-$platform"
 # Verify expected files exist
 test -x "$package_root/bin/gd"
 test -x "$package_root/bin/guardian-mcp"
+test -f "$package_root/guardian.config.json"
 test -f "$package_root/plugin.mcp.json"
 test -f "$package_root/.claude-plugin/plugin.json"
 test -f "$package_root/.claude-plugin/claude.plugin"

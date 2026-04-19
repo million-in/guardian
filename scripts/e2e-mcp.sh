@@ -6,7 +6,7 @@ cd "$ROOT"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/guardian-mcp.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
-absolute_config="$ROOT/guardian.config.example.json"
+absolute_config="$ROOT/guardian.config.json"
 
 ./scripts/guardian-check.sh analyze samples/go_bad.go > "$tmp_dir/analyze.json"
 jq -e '.result.pass == false' "$tmp_dir/analyze.json" >/dev/null

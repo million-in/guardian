@@ -1,5 +1,6 @@
 const std = @import("std");
 const guardian_config = @import("config.zig");
+const jsonrpc = @import("jsonrpc.zig");
 const types = @import("types.zig");
 const nesting = @import("analyzers/nesting.zig");
 const complexity = @import("analyzers/complexity.zig");
@@ -59,7 +60,7 @@ pub fn analyze(
     allocator.free(type_v);
 
     // ── Cohesion/coupling ──
-    const cohesion_v = try cohesion.analyzeCohesion(allocator, masked_lines, lang, cfg);
+    const cohesion_v = try cohesion.analyzeCohesion(allocator, raw_lines, masked_lines, lang, cfg);
     try all.appendSlice(cohesion_v);
     allocator.free(cohesion_v);
 
@@ -179,28 +180,38 @@ fn buildExcerpt(
     const start_idx: usize = if (line > 0 and line - 1 < raw_lines.len) line - 1 else 0;
     const requested_end: usize = if (end_line > 0 and end_line <= raw_lines.len) end_line else raw_lines.len;
     const capped_end = @min(requested_end, start_idx + @as(usize, max_lines));
+    const max_chars_usize = @as(usize, max_chars);
 
     var buf = std.array_list.Managed(u8).init(allocator);
     const writer = buf.writer();
+    var truncated = false;
 
     var idx = start_idx;
     while (idx < capped_end) : (idx += 1) {
         const current = types.trimRight(raw_lines[idx]);
         if (buf.items.len > 0) {
+            if (buf.items.len >= max_chars_usize) {
+                truncated = true;
+                break;
+            }
             try writer.writeByte('\n');
         }
-        if (buf.items.len + current.len > max_chars) {
-            const remaining = max_chars - @as(u32, @intCast(buf.items.len));
+        if (buf.items.len >= max_chars_usize) {
+            truncated = true;
+            break;
+        }
+        const remaining = max_chars_usize - buf.items.len;
+        if (current.len > remaining) {
             if (remaining > 0) {
-                const slice_len: usize = @intCast(@min(current.len, remaining));
-                try writer.writeAll(current[0..slice_len]);
+                try writer.writeAll(current[0..remaining]);
             }
+            truncated = true;
             break;
         }
         try writer.writeAll(current);
     }
 
-    if (requested_end > capped_end or buf.items.len >= max_chars) {
+    if (requested_end > capped_end or truncated) {
         if (buf.items.len > 0 and buf.items[buf.items.len - 1] != '\n') {
             try writer.writeByte('\n');
         }
@@ -211,14 +222,49 @@ fn buildExcerpt(
 }
 
 fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
-    for (s) |ch| {
-        switch (ch) {
-            '"' => try writer.writeAll("\\\""),
-            '\\' => try writer.writeAll("\\\\"),
-            '\n' => try writer.writeAll("\\n"),
-            '\r' => try writer.writeAll("\\r"),
-            '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(ch),
-        }
-    }
+    try jsonrpc.writeJsonEscaped(writer, s);
+}
+
+const testing = std.testing;
+
+test "analyzer: excerpts clamp without underflow when newline uses remaining budget" {
+    const lines = [_][]const u8{
+        "abc",
+        "def",
+    };
+
+    const excerpt = try buildExcerpt(testing.allocator, &lines, 1, 2, 2, 3);
+    defer testing.allocator.free(excerpt);
+
+    try testing.expectEqualStrings("abc\n...", excerpt);
+}
+
+test "analyzer: result json escapes control bytes" {
+    const violations = try testing.allocator.alloc(Violation, 1);
+    defer testing.allocator.free(violations);
+    violations[0] = .{
+        .line = 1,
+        .column = 0,
+        .end_line = 1,
+        .rule = .banned_type,
+        .severity = .@"error",
+        .message = "bad\x01value",
+        .excerpt = "line\x02text",
+    };
+
+    const result = AnalysisResult{
+        .violations = violations,
+        .file_path = "sample\x03.go",
+        .language = .go,
+        .line_count = 1,
+        .error_count = 1,
+        .warn_count = 0,
+    };
+
+    const json = try resultToJson(testing.allocator, result);
+    defer testing.allocator.free(json);
+
+    try testing.expect(std.mem.indexOf(u8, json, "\\u0001") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\\u0002") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\\u0003") != null);
 }

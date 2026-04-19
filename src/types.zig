@@ -167,6 +167,7 @@ pub fn maskSource(
             .allow_block_comments = false,
             .allow_single_quotes = true,
             .backtick_mode = .none,
+            .mask_line_literals = true,
         }),
         .python => maskPythonSource(source, masked),
     }
@@ -184,6 +185,7 @@ const BraceMaskOptions = struct {
     allow_block_comments: bool,
     allow_single_quotes: bool,
     backtick_mode: BacktickMode,
+    mask_line_literals: bool = false,
 };
 
 fn maskBraceStyleSource(source: []const u8, masked: []u8, options: BraceMaskOptions) void {
@@ -196,6 +198,10 @@ fn maskBraceStyleSource(source: []const u8, masked: []u8, options: BraceMaskOpti
         backtick_raw,
         template_raw,
         template_expr,
+        template_expr_line_comment,
+        template_expr_block_comment,
+        template_expr_single_quote,
+        template_expr_double_quote,
     };
 
     var mode: Mode = .code;
@@ -283,6 +289,28 @@ fn maskBraceStyleSource(source: []const u8, masked: []u8, options: BraceMaskOpti
                 if (ch != '\n') {
                     masked[i] = ' ';
                 }
+                if (ch == '/' and i + 1 < source.len and source[i + 1] == '/') {
+                    masked[i + 1] = ' ';
+                    mode = .template_expr_line_comment;
+                    i += 1;
+                    continue;
+                }
+                if (options.allow_block_comments and ch == '/' and i + 1 < source.len and source[i + 1] == '*') {
+                    masked[i + 1] = ' ';
+                    mode = .template_expr_block_comment;
+                    i += 1;
+                    continue;
+                }
+                if (options.allow_single_quotes and ch == '\'') {
+                    escaped = false;
+                    mode = .template_expr_single_quote;
+                    continue;
+                }
+                if (ch == '"') {
+                    escaped = false;
+                    mode = .template_expr_double_quote;
+                    continue;
+                }
                 if (ch == '{') {
                     template_depth += 1;
                     continue;
@@ -292,6 +320,55 @@ fn maskBraceStyleSource(source: []const u8, masked: []u8, options: BraceMaskOpti
                     if (template_depth == 0) {
                         mode = .template_raw;
                     }
+                }
+            },
+            .template_expr_line_comment => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                } else {
+                    mode = .template_expr;
+                }
+            },
+            .template_expr_block_comment => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (ch == '*' and i + 1 < source.len and source[i + 1] == '/') {
+                    masked[i + 1] = ' ';
+                    i += 1;
+                    mode = .template_expr;
+                }
+            },
+            .template_expr_single_quote => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '\'' or ch == '\n') {
+                    mode = .template_expr;
+                }
+            },
+            .template_expr_double_quote => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '"' or ch == '\n') {
+                    mode = .template_expr;
                 }
             },
             .code => {
@@ -307,6 +384,19 @@ fn maskBraceStyleSource(source: []const u8, masked: []u8, options: BraceMaskOpti
                     masked[i] = ' ';
                     masked[i + 1] = ' ';
                     mode = .block_comment;
+                    i += 1;
+                    continue;
+                }
+
+                if (options.mask_line_literals and
+                    ch == '\\' and
+                    i + 1 < source.len and
+                    source[i + 1] == '\\' and
+                    isLineOnlyWhitespaceBefore(source, i))
+                {
+                    masked[i] = ' ';
+                    masked[i + 1] = ' ';
+                    mode = .line_comment;
                     i += 1;
                     continue;
                 }
@@ -336,6 +426,20 @@ fn maskBraceStyleSource(source: []const u8, masked: []u8, options: BraceMaskOpti
             },
         }
     }
+}
+
+fn isLineOnlyWhitespaceBefore(source: []const u8, idx: usize) bool {
+    var cursor = idx;
+    while (cursor > 0) {
+        cursor -= 1;
+        if (source[cursor] == '\n') {
+            return true;
+        }
+        if (source[cursor] != ' ' and source[cursor] != '\t' and source[cursor] != '\r') {
+            return false;
+        }
+    }
+    return true;
 }
 
 fn maskPythonSource(source: []const u8, masked: []u8) void {
@@ -466,4 +570,34 @@ pub fn isLikelyInString(line: []const u8, pos: usize) bool {
         i += 1;
     }
     return (quote_count % 2) != 0;
+}
+
+const testing = std.testing;
+
+test "maskSource: Zig multiline strings are blanked" {
+    const src =
+        \\const help =
+        \\    \\if you pass { braces }
+        \\;
+    ;
+
+    const masked = try maskSource(testing.allocator, src, .zig_lang);
+    defer testing.allocator.free(masked);
+
+    try testing.expect(std.mem.indexOf(u8, masked, "if you pass") == null);
+    try testing.expect(std.mem.indexOf(u8, masked, "{ braces }") == null);
+}
+
+test "maskSource: TypeScript template expressions ignore braces inside nested strings" {
+    const src =
+        \\const s = `result: ${foo("}")}`;
+    ;
+
+    const masked = try maskSource(testing.allocator, src, .typescript);
+    defer testing.allocator.free(masked);
+
+    try testing.expect(masked.len == src.len);
+    try testing.expect(masked[masked.len - 1] == ';');
+    try testing.expect(std.mem.indexOf(u8, masked, "\"}\"") == null);
+    try testing.expect(std.mem.indexOf(u8, masked, "foo") == null);
 }

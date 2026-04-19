@@ -70,10 +70,10 @@ pub fn build(
     lang: Language,
 ) !Model {
     return switch (lang) {
-        .go => buildGoModel(allocator, masked_lines),
-        .typescript => buildTypeScriptModel(allocator, masked_lines),
+        .go => buildGoModel(allocator, raw_lines, masked_lines),
+        .typescript => buildTypeScriptModel(allocator, raw_lines, masked_lines),
         .python => buildPythonModel(allocator, raw_lines, masked_lines),
-        .zig_lang => buildZigModel(allocator, masked_lines),
+        .zig_lang => buildZigModel(allocator, raw_lines, masked_lines),
     };
 }
 
@@ -197,10 +197,12 @@ const SignatureBlock = struct {
 
 fn buildGoModel(
     allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
     masked_lines: []const []const u8,
 ) !Model {
     var functions = std.array_list.Managed(FunctionInfo).init(allocator);
     var type_infos = std.array_list.Managed(TypeInfo).init(allocator);
+    const scope_names = try collectGoScopeNames(allocator, raw_lines, masked_lines);
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
@@ -236,6 +238,7 @@ fn buildGoModel(
                     block.end_line_idx,
                     parsed.receiver_name,
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -268,10 +271,12 @@ fn buildGoModel(
 
 fn buildTypeScriptModel(
     allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
     masked_lines: []const []const u8,
 ) !Model {
     var functions = std.array_list.Managed(FunctionInfo).init(allocator);
     var type_infos = std.array_list.Managed(TypeInfo).init(allocator);
+    const scope_names = try collectTypeScriptScopeNames(allocator, raw_lines, masked_lines);
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
@@ -296,6 +301,7 @@ fn buildTypeScriptModel(
                     block.open_line_idx + 1,
                     block.end_line_idx,
                     name,
+                    scope_names,
                     &builder,
                     &functions,
                 );
@@ -354,6 +360,7 @@ fn buildTypeScriptModel(
                     block.end_line_idx,
                     "",
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -389,6 +396,7 @@ fn buildPythonModel(
 ) !Model {
     var functions = std.array_list.Managed(FunctionInfo).init(allocator);
     var type_infos = std.array_list.Managed(TypeInfo).init(allocator);
+    const scope_names = try collectPythonScopeNames(allocator, raw_lines);
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
@@ -414,6 +422,7 @@ fn buildPythonModel(
                     idx,
                     class_end,
                     class_name,
+                    scope_names,
                     &builder,
                     &functions,
                 );
@@ -435,6 +444,7 @@ fn buildPythonModel(
                     func_end + 1,
                     "",
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -465,10 +475,12 @@ fn buildPythonModel(
 
 fn buildZigModel(
     allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
     masked_lines: []const []const u8,
 ) !Model {
     var functions = std.array_list.Managed(FunctionInfo).init(allocator);
     var type_infos = std.array_list.Managed(TypeInfo).init(allocator);
+    const scope_names = try collectZigScopeNames(allocator, raw_lines, masked_lines);
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
@@ -493,6 +505,7 @@ fn buildZigModel(
                     block.open_line_idx + 1,
                     block.end_line_idx,
                     name,
+                    scope_names,
                     &builder,
                     &functions,
                 );
@@ -504,7 +517,11 @@ fn buildZigModel(
 
         if (looksLikeZigFunctionDecl(trimmed)) {
             const block = try collectBraceBlock(allocator, masked_lines, idx);
-            const parsed = try parseZigFunctionSignature(allocator, block.text, "");
+            const signature_text = if (std.mem.startsWith(u8, trimmed, "test "))
+                std.mem.trim(u8, raw_lines[idx], " \t")
+            else
+                block.text;
+            const parsed = try parseZigFunctionSignature(allocator, signature_text, "");
             if (parsed.name.len > 0) {
                 const summary = try analyzeZigBody(
                     allocator,
@@ -513,6 +530,7 @@ fn buildZigModel(
                     block.end_line_idx,
                     parsed.receiver_name,
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -671,6 +689,14 @@ fn parseZigFunctionSignature(
     owner_hint: []const u8,
 ) !ParsedFunction {
     const text = std.mem.trim(u8, signature, " \t");
+    if (std.mem.startsWith(u8, text, "test ")) {
+        return .{
+            .name = extractZigTestName(text),
+            .owner_type = owner_hint,
+            .argument_count = 0,
+            .is_public = false,
+        };
+    }
     if (!looksLikeZigFunctionDecl(text)) {
         return .{ .name = "", .argument_count = 0, .is_public = false };
     }
@@ -773,6 +799,7 @@ fn scanTypeScriptClass(
     start_idx: usize,
     end_idx: usize,
     class_name: []const u8,
+    scope_names: []const []const u8,
     builder: *TypeBuilder,
     functions: *std.array_list.Managed(FunctionInfo),
 ) !void {
@@ -798,6 +825,7 @@ fn scanTypeScriptClass(
                     block.end_line_idx,
                     "this",
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -868,6 +896,7 @@ fn scanPythonClass(
     class_idx: usize,
     class_end: usize,
     class_name: []const u8,
+    scope_names: []const []const u8,
     builder: *TypeBuilder,
     functions: *std.array_list.Managed(FunctionInfo),
 ) !void {
@@ -906,6 +935,7 @@ fn scanPythonClass(
                     func_end + 1,
                     "self",
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -967,6 +997,7 @@ fn scanZigStruct(
     start_idx: usize,
     end_idx: usize,
     struct_name: []const u8,
+    scope_names: []const []const u8,
     builder: *TypeBuilder,
     functions: *std.array_list.Managed(FunctionInfo),
 ) !void {
@@ -992,6 +1023,7 @@ fn scanZigStruct(
                     block.end_line_idx,
                     parsed.receiver_name,
                     parsed.param_names,
+                    scope_names,
                 );
                 try functions.append(.{
                     .name = parsed.name,
@@ -1033,6 +1065,7 @@ fn analyzeGoBody(
     end_idx: usize,
     receiver_name: []const u8,
     param_names: []const []const u8,
+    scope_names: []const []const u8,
 ) !BodySummary {
     var body = BodyBuilder.init(allocator);
     try seedDeclaredNames(&body.declared, param_names);
@@ -1053,7 +1086,7 @@ fn analyzeGoBody(
         }
 
         try appendGoDeclarations(&body.declared, trimmed);
-        try appendCommonTouches(&body, trimmed, receiver_name, &go_keywords);
+        try appendCommonTouches(&body, trimmed, receiver_name, &go_keywords, scope_names, &go_builtins);
         try appendLifecycleActions(&body.lifecycle_actions, allocator, trimmed, try lineNumber(idx));
     }
 
@@ -1067,6 +1100,7 @@ fn analyzeTypeScriptBody(
     end_idx: usize,
     receiver_name: []const u8,
     param_names: []const []const u8,
+    scope_names: []const []const u8,
 ) !BodySummary {
     var body = BodyBuilder.init(allocator);
     try seedDeclaredNames(&body.declared, param_names);
@@ -1080,7 +1114,7 @@ fn analyzeTypeScriptBody(
         }
 
         try appendTypeScriptDeclarations(&body.declared, trimmed);
-        try appendCommonTouches(&body, trimmed, receiver_name, &typescript_keywords);
+        try appendCommonTouches(&body, trimmed, receiver_name, &typescript_keywords, scope_names, &typescript_builtins);
         try appendLifecycleActions(&body.lifecycle_actions, allocator, trimmed, try lineNumber(idx));
     }
 
@@ -1094,6 +1128,7 @@ fn analyzePythonBody(
     end_idx: usize,
     receiver_name: []const u8,
     param_names: []const []const u8,
+    scope_names: []const []const u8,
 ) !BodySummary {
     var body = BodyBuilder.init(allocator);
     try seedDeclaredNames(&body.declared, param_names);
@@ -1111,7 +1146,7 @@ fn analyzePythonBody(
         }
 
         try appendPythonDeclarations(&body.declared, trimmed);
-        try appendCommonTouches(&body, trimmed, receiver_name, &python_keywords);
+        try appendCommonTouches(&body, trimmed, receiver_name, &python_keywords, scope_names, &python_builtins);
         try appendLifecycleActions(&body.lifecycle_actions, allocator, trimmed, try lineNumber(idx));
     }
 
@@ -1125,6 +1160,7 @@ fn analyzeZigBody(
     end_idx: usize,
     receiver_name: []const u8,
     param_names: []const []const u8,
+    scope_names: []const []const u8,
 ) !BodySummary {
     var body = BodyBuilder.init(allocator);
     try seedDeclaredNames(&body.declared, param_names);
@@ -1145,7 +1181,7 @@ fn analyzeZigBody(
         }
 
         try appendZigDeclarations(&body.declared, trimmed);
-        try appendCommonTouches(&body, trimmed, receiver_name, &zig_keywords);
+        try appendCommonTouches(&body, trimmed, receiver_name, &zig_keywords, scope_names, &zig_builtins);
         try appendLifecycleActions(&body.lifecycle_actions, allocator, trimmed, try lineNumber(idx));
     }
 
@@ -1157,10 +1193,167 @@ fn appendCommonTouches(
     line: []const u8,
     receiver_name: []const u8,
     keywords: []const []const u8,
+    scope_names: []const []const u8,
+    builtins: []const []const u8,
 ) !void {
     try appendReceiverTouches(body.allocator, &body.touched, &body.bool_reads, line, receiver_name);
-    try appendDottedRootTouches(&body.touched, &body.declared, line, receiver_name, keywords);
-    try appendFreeCallTouches(&body.touched, &body.declared, line, keywords);
+    try appendDottedRootTouches(&body.touched, &body.declared, line, receiver_name, keywords, scope_names, builtins);
+    try appendFreeCallTouches(&body.touched, &body.declared, line, keywords, scope_names, builtins);
+}
+
+fn collectGoScopeNames(
+    allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
+    masked_lines: []const []const u8,
+) ![]const []const u8 {
+    var names = std.array_list.Managed([]const u8).init(allocator);
+    var depth: i32 = 0;
+    var in_import_block = false;
+
+    for (raw_lines, masked_lines) |raw_line, masked_line| {
+        const raw_trimmed = std.mem.trimLeft(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimLeft(u8, masked_line, " \t");
+
+        if (depth == 0) {
+            if (in_import_block) {
+                if (std.mem.eql(u8, raw_trimmed, ")")) {
+                    in_import_block = false;
+                } else if (extractGoImportName(raw_trimmed)) |import_name| {
+                    try addUniqueString(&names, import_name);
+                }
+            } else if (std.mem.eql(u8, raw_trimmed, "import (")) {
+                in_import_block = true;
+            } else if (std.mem.startsWith(u8, raw_trimmed, "import ")) {
+                if (extractGoImportName(raw_trimmed["import ".len..])) |import_name| {
+                    try addUniqueString(&names, import_name);
+                }
+            } else if (std.mem.startsWith(u8, masked_trimmed, "func ")) {
+                try addUniqueString(&names, extractGoScopeFunctionName(masked_trimmed));
+            } else if (std.mem.startsWith(u8, masked_trimmed, "type ")) {
+                try addUniqueString(&names, extractGoTypeName(masked_trimmed));
+            } else if (std.mem.startsWith(u8, masked_trimmed, "var ") or std.mem.startsWith(u8, masked_trimmed, "const ")) {
+                const rest = if (std.mem.startsWith(u8, masked_trimmed, "var ")) masked_trimmed["var ".len..] else masked_trimmed["const ".len..];
+                try appendDelimitedNames(&names, rest);
+            }
+        }
+
+        depth += braceDelta(masked_trimmed);
+    }
+
+    return names.toOwnedSlice();
+}
+
+fn collectTypeScriptScopeNames(
+    allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
+    masked_lines: []const []const u8,
+) ![]const []const u8 {
+    var names = std.array_list.Managed([]const u8).init(allocator);
+    var depth: i32 = 0;
+    var in_named_import_block = false;
+
+    for (raw_lines, masked_lines) |raw_line, masked_line| {
+        const raw_trimmed = std.mem.trimLeft(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimLeft(u8, masked_line, " \t");
+
+        if (depth == 0) {
+            if (in_named_import_block) {
+                try appendTypeScriptNamedImportItems(&names, masked_trimmed);
+                if (std.mem.indexOfScalar(u8, masked_trimmed, '}') != null) {
+                    in_named_import_block = false;
+                }
+            } else if (std.mem.startsWith(u8, masked_trimmed, "import ")) {
+                try appendTypeScriptImportBindings(&names, raw_trimmed, masked_trimmed, &in_named_import_block);
+            } else if (looksLikeTsClassDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractTsNamedDeclName(masked_trimmed, "class"));
+            } else if (looksLikeTsInterfaceDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractTsNamedDeclName(masked_trimmed, "interface"));
+            } else if (looksLikeTsObjectTypeDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractTsTypeAliasName(masked_trimmed));
+            } else if (looksLikeTsFunctionDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractTypeScriptScopeFunctionName(masked_trimmed));
+            } else if (startsWithAny(masked_trimmed, &[_][]const u8{ "const ", "let ", "var ", "export const ", "export let ", "export var " })) {
+                if (std.mem.indexOfScalar(u8, masked_trimmed, '=')) |eq| {
+                    try appendDelimitedNames(&names, extractTypeScriptBindingPrefix(masked_trimmed[0..eq]));
+                }
+            }
+        }
+
+        depth += braceDelta(masked_trimmed);
+    }
+
+    return names.toOwnedSlice();
+}
+
+fn collectPythonScopeNames(
+    allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
+) ![]const []const u8 {
+    var names = std.array_list.Managed([]const u8).init(allocator);
+
+    for (raw_lines) |line| {
+        if (types.leadingWhitespace(line) != 0) {
+            continue;
+        }
+
+        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        if (trimmed.len == 0) {
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "import ")) {
+            try appendPythonImportNames(&names, trimmed["import ".len..]);
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "from ")) {
+            if (std.mem.indexOf(u8, trimmed, " import ")) |pos| {
+                try appendPythonFromImportNames(&names, trimmed[pos + " import ".len ..]);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "def ") or std.mem.startsWith(u8, trimmed, "async def ")) {
+            try addUniqueString(&names, extractPythonScopeFunctionName(trimmed));
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "class ")) {
+            try addUniqueString(&names, extractPythonClassName(trimmed));
+            continue;
+        }
+        if (findPythonAssignmentOperator(trimmed)) |pos| {
+            try appendDelimitedNames(&names, trimmed[0..pos]);
+        }
+    }
+
+    return names.toOwnedSlice();
+}
+
+fn collectZigScopeNames(
+    allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
+    masked_lines: []const []const u8,
+) ![]const []const u8 {
+    var names = std.array_list.Managed([]const u8).init(allocator);
+    var depth: i32 = 0;
+
+    for (raw_lines, masked_lines) |raw_line, masked_line| {
+        const raw_trimmed = std.mem.trimLeft(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimLeft(u8, masked_line, " \t");
+
+        if (depth == 0) {
+            if (startsWithAny(masked_trimmed, &[_][]const u8{ "const ", "var ", "pub const ", "pub var " })) {
+                if (std.mem.indexOfScalar(u8, masked_trimmed, '=')) |eq| {
+                    try appendDelimitedNames(&names, extractZigBindingPrefix(masked_trimmed[0..eq]));
+                }
+            }
+            if (looksLikeZigFunctionDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractZigScopeFunctionName(raw_trimmed));
+            }
+        }
+
+        depth += braceDelta(masked_trimmed);
+    }
+
+    return names.toOwnedSlice();
 }
 
 fn appendReceiverTouches(
@@ -1204,6 +1397,8 @@ fn appendDottedRootTouches(
     line: []const u8,
     receiver_name: []const u8,
     keywords: []const []const u8,
+    scope_names: []const []const u8,
+    builtins: []const []const u8,
 ) !void {
     var idx: usize = 0;
     while (idx < line.len) : (idx += 1) {
@@ -1215,7 +1410,11 @@ fn appendDottedRootTouches(
         if (root.len == 0 or std.mem.eql(u8, root, receiver_name)) {
             continue;
         }
-        if (containsString(declared.items, root) or isKeyword(root, keywords)) {
+        if (containsString(declared.items, root) or
+            isKeyword(root, keywords) or
+            containsString(scope_names, root) or
+            containsString(builtins, root))
+        {
             continue;
         }
         try addUniqueString(touched, root);
@@ -1227,6 +1426,8 @@ fn appendFreeCallTouches(
     declared: *std.array_list.Managed([]const u8),
     line: []const u8,
     keywords: []const []const u8,
+    scope_names: []const []const u8,
+    builtins: []const []const u8,
 ) !void {
     var idx: usize = 0;
     while (idx < line.len) {
@@ -1240,7 +1441,11 @@ fn appendFreeCallTouches(
             idx = end;
             continue;
         }
-        if (containsString(declared.items, token) or isKeyword(token, keywords)) {
+        if (containsString(declared.items, token) or
+            isKeyword(token, keywords) or
+            containsString(scope_names, token) or
+            containsString(builtins, token))
+        {
             idx = end;
             continue;
         }
@@ -1375,16 +1580,14 @@ fn appendPythonDeclarations(list: *std.array_list.Managed([]const u8), line: []c
     }
 
     if (std.mem.startsWith(u8, line, "with ")) {
-        if (std.mem.indexOf(u8, line, " as ")) |pos| {
-            const name = std.mem.trimRight(u8, line[pos + " as ".len ..], ":");
-            try addUniqueString(list, name);
-        }
+        try appendPythonWithBindings(list, line["with ".len..]);
     }
 
-    if (std.mem.indexOfScalar(u8, line, '=')) |pos| {
-        if (pos > 0 and line[pos - 1] == '=') {
-            return;
-        }
+    if (findPythonWalrusOperator(line)) |pos| {
+        try addUniqueString(list, identifierBeforeOperator(line, pos));
+    }
+
+    if (findPythonAssignmentOperator(line)) |pos| {
         try appendDelimitedNames(list, line[0..pos]);
     }
 }
@@ -1419,6 +1622,264 @@ fn appendDelimitedNames(list: *std.array_list.Managed([]const u8), text: []const
         }
         try addUniqueString(list, name);
     }
+}
+
+const PythonSignatureDepth = struct {
+    paren: i32 = 0,
+    bracket: i32 = 0,
+    brace: i32 = 0,
+};
+
+fn pythonSignatureLineComplete(line: []const u8, depth: *PythonSignatureDepth) bool {
+    for (line) |ch| {
+        switch (ch) {
+            '(' => depth.paren += 1,
+            ')' => {
+                if (depth.paren > 0) {
+                    depth.paren -= 1;
+                }
+            },
+            '[' => depth.bracket += 1,
+            ']' => {
+                if (depth.bracket > 0) {
+                    depth.bracket -= 1;
+                }
+            },
+            '{' => depth.brace += 1,
+            '}' => {
+                if (depth.brace > 0) {
+                    depth.brace -= 1;
+                }
+            },
+            ':' => {
+                if (depth.paren == 0 and depth.bracket == 0 and depth.brace == 0) {
+                    return true;
+                }
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn appendTypeScriptImportBindings(
+    list: *std.array_list.Managed([]const u8),
+    raw_line: []const u8,
+    masked_line: []const u8,
+    in_named_import_block: *bool,
+) !void {
+    var text = std.mem.trim(u8, masked_line["import ".len..], " \t;");
+    if (std.mem.startsWith(u8, text, "type ")) {
+        text = std.mem.trimLeft(u8, text["type ".len..], " \t");
+    }
+
+    if (std.mem.startsWith(u8, text, "* as ")) {
+        try addUniqueString(list, firstIdentifier(text["* as ".len..]));
+        return;
+    }
+
+    if (std.mem.indexOfScalar(u8, text, '{')) |open| {
+        const default_part = std.mem.trim(u8, text[0..open], " \t,");
+        if (default_part.len > 0) {
+            try addUniqueString(list, firstIdentifier(default_part));
+        }
+        if (std.mem.indexOfScalarPos(u8, text, open + 1, '}')) |close| {
+            try appendTypeScriptNamedImportItems(list, text[open + 1 .. close]);
+        } else {
+            in_named_import_block.* = true;
+            try appendTypeScriptNamedImportItems(list, text[open + 1 ..]);
+        }
+        return;
+    }
+
+    if (std.mem.indexOf(u8, text, " from ")) |from_pos| {
+        text = std.mem.trim(u8, text[0..from_pos], " \t,");
+    } else if (std.mem.indexOf(u8, raw_line, " from ")) |from_pos| {
+        const prefix_len = from_pos - "import ".len;
+        text = std.mem.trim(u8, text[0..@min(text.len, prefix_len)], " \t,");
+    }
+    try addUniqueString(list, firstIdentifier(text));
+}
+
+fn appendTypeScriptNamedImportItems(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
+    const segments = try topLevelSegments(list.allocator, std.mem.trim(u8, text, " \t,"));
+    for (segments) |segment| {
+        var trimmed = std.mem.trim(u8, segment, " \t,");
+        if (trimmed.len == 0 or trimmed[0] == '}') {
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "type ")) {
+            trimmed = std.mem.trimLeft(u8, trimmed["type ".len..], " \t");
+        }
+        if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
+            try addUniqueString(list, firstIdentifier(trimmed[as_pos + " as ".len ..]));
+        } else {
+            try addUniqueString(list, firstIdentifier(trimmed));
+        }
+    }
+}
+
+fn appendPythonImportNames(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
+    const segments = try topLevelSegments(list.allocator, text);
+    for (segments) |segment| {
+        const trimmed = std.mem.trim(u8, segment, " \t");
+        if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
+            try addUniqueString(list, firstIdentifier(trimmed[as_pos + " as ".len ..]));
+        } else {
+            try addUniqueString(list, firstIdentifier(trimmed));
+        }
+    }
+}
+
+fn appendPythonFromImportNames(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
+    const segments = try topLevelSegments(list.allocator, std.mem.trim(u8, text, " \t()"));
+    for (segments) |segment| {
+        const trimmed = std.mem.trim(u8, segment, " \t,");
+        if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "*")) {
+            continue;
+        }
+        if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
+            try addUniqueString(list, firstIdentifier(trimmed[as_pos + " as ".len ..]));
+        } else {
+            try addUniqueString(list, firstIdentifier(trimmed));
+        }
+    }
+}
+
+fn appendPythonWithBindings(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
+    const segments = try topLevelSegments(list.allocator, std.mem.trimRight(u8, text, ":"));
+    for (segments) |segment| {
+        const trimmed = std.mem.trim(u8, segment, " \t");
+        if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
+            try addUniqueString(list, firstIdentifier(trimmed[as_pos + " as ".len ..]));
+        }
+    }
+}
+
+fn findPythonWalrusOperator(line: []const u8) ?usize {
+    return std.mem.indexOf(u8, line, ":=");
+}
+
+fn findPythonAssignmentOperator(line: []const u8) ?usize {
+    for (line, 0..) |ch, idx| {
+        if (ch != '=') {
+            continue;
+        }
+        if (idx > 0) {
+            switch (line[idx - 1]) {
+                '!', '<', '>', '=', '+', '-', '*', '/', '%', '&', '|', '^', ':' => continue,
+                else => {},
+            }
+        }
+        if (idx + 1 < line.len and line[idx + 1] == '=') {
+            continue;
+        }
+        return idx;
+    }
+    return null;
+}
+
+fn identifierBeforeOperator(line: []const u8, op_pos: usize) []const u8 {
+    return lastTypeIdentifier(line[0..op_pos]);
+}
+
+fn extractGoImportName(text: []const u8) ?[]const u8 {
+    var trimmed = std.mem.trim(u8, text, " \t");
+    if (trimmed.len == 0 or std.mem.eql(u8, trimmed, ")")) {
+        return null;
+    }
+    if (std.mem.startsWith(u8, trimmed, "import ")) {
+        trimmed = std.mem.trimLeft(u8, trimmed["import ".len..], " \t");
+    }
+    if (trimmed.len == 0) {
+        return null;
+    }
+    if (trimmed[0] == '.' or trimmed[0] == '_') {
+        return null;
+    }
+    if (trimmed[0] == '"') {
+        return extractImportPathBase(trimmed);
+    }
+
+    const alias = firstIdentifier(trimmed);
+    if (alias.len == 0 or std.mem.eql(u8, alias, "_")) {
+        return null;
+    }
+    return alias;
+}
+
+fn extractImportPathBase(text: []const u8) ?[]const u8 {
+    const start = std.mem.indexOfScalar(u8, text, '"') orelse return null;
+    const end = std.mem.indexOfScalarPos(u8, text, start + 1, '"') orelse return null;
+    const path = text[start + 1 .. end];
+    const base_start = std.mem.lastIndexOfScalar(u8, path, '/') orelse return path;
+    return path[base_start + 1 ..];
+}
+
+fn extractTypeScriptScopeFunctionName(text: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, text, "function ")) |pos| {
+        return firstIdentifier(text[pos + "function ".len ..]);
+    }
+    if (std.mem.indexOfScalar(u8, text, '=')) |eq| {
+        return lastTypeIdentifier(text[0..eq]);
+    }
+    return "";
+}
+
+fn extractGoScopeFunctionName(text: []const u8) []const u8 {
+    if (!std.mem.startsWith(u8, text, "func ")) {
+        return "";
+    }
+
+    var after = std.mem.trimLeft(u8, text["func ".len..], " \t");
+    if (after.len > 0 and after[0] == '(') {
+        const close = findMatchingForward(after, 0, '(', ')') orelse return "";
+        after = std.mem.trimLeft(u8, after[close + 1 ..], " \t");
+    }
+    return firstIdentifier(after);
+}
+
+fn extractPythonScopeFunctionName(text: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, text, "async def ")) {
+        return firstIdentifier(text["async def ".len..]);
+    }
+    if (std.mem.startsWith(u8, text, "def ")) {
+        return firstIdentifier(text["def ".len..]);
+    }
+    return "";
+}
+
+fn extractTypeScriptBindingPrefix(text: []const u8) []const u8 {
+    inline for (&[_][]const u8{ "export const ", "export let ", "export var ", "const ", "let ", "var " }) |prefix| {
+        if (std.mem.startsWith(u8, text, prefix)) {
+            return text[prefix.len..];
+        }
+    }
+    return text;
+}
+
+fn extractZigScopeFunctionName(text: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, text, " \t");
+    if (std.mem.startsWith(u8, trimmed, "test ")) {
+        return extractZigTestName(trimmed);
+    }
+    const fn_pos = std.mem.indexOf(u8, trimmed, "fn ") orelse return "";
+    return firstIdentifier(trimmed[fn_pos + "fn ".len ..]);
+}
+
+fn extractZigTestName(text: []const u8) []const u8 {
+    const first_quote = std.mem.indexOfScalar(u8, text, '"') orelse return "test";
+    const second_quote = std.mem.indexOfScalarPos(u8, text, first_quote + 1, '"') orelse return "test";
+    return text[first_quote + 1 .. second_quote];
+}
+
+fn extractZigBindingPrefix(text: []const u8) []const u8 {
+    inline for (&[_][]const u8{ "pub const ", "pub var ", "const ", "var " }) |prefix| {
+        if (std.mem.startsWith(u8, text, prefix)) {
+            return text[prefix.len..];
+        }
+    }
+    return text;
 }
 
 fn parseGoParamNames(allocator: std.mem.Allocator, params: []const u8) ![]const []const u8 {
@@ -1524,6 +1985,7 @@ fn collectPythonSignature(
     start_idx: usize,
 ) !struct { text: []const u8, end_idx: usize } {
     var joined = std.array_list.Managed(u8).init(allocator);
+    var depth = PythonSignatureDepth{};
     var idx = start_idx;
     while (idx < lines.len) : (idx += 1) {
         const trimmed = std.mem.trim(u8, lines[idx], " \t");
@@ -1531,7 +1993,7 @@ fn collectPythonSignature(
             try joined.append(' ');
         }
         try joined.appendSlice(trimmed);
-        if (std.mem.indexOfScalar(u8, trimmed, ':') != null) {
+        if (pythonSignatureLineComplete(trimmed, &depth)) {
             break;
         }
     }
@@ -1634,10 +2096,15 @@ fn extractGoStructFieldName(trimmed: []const u8) []const u8 {
     if (trimmed.len == 0 or trimmed[0] == '}' or trimmed[0] == '{') {
         return "";
     }
-    if (trimmed[0] == '*') {
-        return lastTypeIdentifier(trimmed);
+    const field_end = std.mem.indexOfAny(u8, trimmed, " \t`") orelse trimmed.len;
+    const field_segment = trimmed[0..field_end];
+    if (field_segment.len == 0) {
+        return "";
     }
-    return firstIdentifier(trimmed);
+    if (field_segment[0] == '*' or std.mem.indexOfScalar(u8, field_segment, '.') != null) {
+        return lastTypeIdentifier(field_segment);
+    }
+    return firstIdentifier(field_segment);
 }
 
 fn extractTsNamedDeclName(text: []const u8, keyword: []const u8) []const u8 {
@@ -1772,7 +2239,7 @@ fn looksLikeZigStructDecl(trimmed: []const u8) bool {
 }
 
 fn looksLikeZigFunctionDecl(trimmed: []const u8) bool {
-    return startsWithAny(trimmed, &[_][]const u8{ "fn ", "pub fn ", "export fn " });
+    return startsWithAny(trimmed, &[_][]const u8{ "fn ", "pub fn ", "export fn ", "test " });
 }
 
 fn startsWithAny(text: []const u8, prefixes: []const []const u8) bool {
@@ -1823,27 +2290,15 @@ fn isStateIndicatorName(name: []const u8) bool {
 }
 
 pub fn classifyLifecycleVerb(name: []const u8) ?LifecycleActionKind {
-    if (startsWithInsensitive(name, "init") or
-        startsWithInsensitive(name, "start") or
-        startsWithInsensitive(name, "open") or
-        startsWithInsensitive(name, "connect") or
-        startsWithInsensitive(name, "begin") or
-        startsWithInsensitive(name, "create") or
-        startsWithInsensitive(name, "acquire"))
-    {
-        return .start;
+    for (lifecycle_start_verbs) |verb| {
+        if (matchesLifecycleVerb(name, verb)) {
+            return .start;
+        }
     }
-    if (startsWithInsensitive(name, "close") or
-        startsWithInsensitive(name, "stop") or
-        startsWithInsensitive(name, "disconnect") or
-        startsWithInsensitive(name, "deinit") or
-        startsWithInsensitive(name, "destroy") or
-        startsWithInsensitive(name, "free") or
-        startsWithInsensitive(name, "release") or
-        startsWithInsensitive(name, "cancel") or
-        startsWithInsensitive(name, "dispose"))
-    {
-        return .cleanup;
+    for (lifecycle_cleanup_verbs) |verb| {
+        if (matchesLifecycleVerb(name, verb)) {
+            return .cleanup;
+        }
     }
     return null;
 }
@@ -1985,6 +2440,38 @@ fn startsWithInsensitive(text: []const u8, prefix: []const u8) bool {
     return true;
 }
 
+fn matchesLifecycleVerb(name: []const u8, verb: []const u8) bool {
+    if (!startsWithInsensitive(name, verb)) {
+        return false;
+    }
+    if (name.len == verb.len) {
+        return true;
+    }
+    return !std.ascii.isLower(name[verb.len]);
+}
+
+const lifecycle_start_verbs = [_][]const u8{
+    "init",
+    "start",
+    "open",
+    "connect",
+    "begin",
+    "create",
+    "acquire",
+};
+
+const lifecycle_cleanup_verbs = [_][]const u8{
+    "close",
+    "stop",
+    "disconnect",
+    "deinit",
+    "destroy",
+    "free",
+    "release",
+    "cancel",
+    "dispose",
+};
+
 const go_keywords = [_][]const u8{
     "break",  "case",   "chan",   "const",  "continue", "default",   "defer", "else",    "fallthrough",
     "for",    "func",   "go",     "if",     "import",   "interface", "map",   "package", "range",
@@ -2008,6 +2495,29 @@ const zig_keywords = [_][]const u8{
     "errdefer", "false", "fn",    "for",   "if",       "null",  "orelse",   "pub",   "return",
     "switch",   "test",  "true",  "try",   "var",      "while",
 };
+
+const go_builtins = [_][]const u8{
+    "append",  "cap",  "close", "complex", "copy",  "delete",  "imag",
+    "len",     "make", "new",   "panic",   "print", "println", "real",
+    "recover",
+};
+
+const typescript_builtins = [_][]const u8{
+    "console", "Promise", "Array",   "Object",   "Number",     "String", "Boolean",
+    "JSON",    "Math",    "Date",    "RegExp",   "Error",      "Symbol", "Map",
+    "Set",     "WeakMap", "WeakSet", "parseInt", "parseFloat", "isNaN",  "isFinite",
+};
+
+const python_builtins = [_][]const u8{
+    "len",     "range",     "print", "str",   "int",        "float",   "bool",
+    "list",    "dict",      "set",   "tuple", "isinstance", "hasattr", "getattr",
+    "setattr", "enumerate", "zip",   "map",   "filter",     "sorted",  "reversed",
+    "all",     "any",       "abs",   "min",   "max",        "sum",     "type",
+    "id",      "open",      "input", "exit",  "repr",       "iter",    "next",
+    "vars",    "dir",
+};
+
+const zig_builtins = [_][]const u8{};
 
 const testing = std.testing;
 
@@ -2140,4 +2650,111 @@ test "symbol model: Zig struct methods bind self to owner type" {
     try testing.expectEqual(@as(usize, 1), model.functions.len);
     try testing.expectEqualStrings("Session", model.functions[0].owner_type);
     try testing.expectEqual(@as(u32, 2), model.functions[0].argument_count);
+}
+
+test "symbol model: Python multiline signatures are modeled" {
+    const src =
+        \\def build(
+        \\    client: Client,
+        \\    retries: int,
+        \\) -> Result:
+        \\    return run(client, retries)
+    ;
+
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+    const masked = try types.maskSource(testing.allocator, src, .python);
+    defer testing.allocator.free(masked);
+    const masked_lines = try types.splitLines(testing.allocator, masked);
+    defer testing.allocator.free(masked_lines);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const model = try build(arena.allocator(), raw_lines, masked_lines, .python);
+    try testing.expectEqual(@as(usize, 1), model.functions.len);
+    try testing.expectEqualStrings("build", model.functions[0].name);
+    try testing.expectEqual(@as(u32, 2), model.functions[0].argument_count);
+}
+
+test "symbol model: Python declarations handle with bindings and walrus without polluting comparisons" {
+    const src =
+        \\def process(items):
+        \\    if items == []:
+        \\        return None
+        \\    with open("a") as left, open("b") as right:
+        \\        if (count := len(items)) > 1:
+        \\            return left, right, count
+        \\    return None
+    ;
+
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+    const masked = try types.maskSource(testing.allocator, src, .python);
+    defer testing.allocator.free(masked);
+    const masked_lines = try types.splitLines(testing.allocator, masked);
+    defer testing.allocator.free(masked_lines);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const model = try build(arena.allocator(), raw_lines, masked_lines, .python);
+    try testing.expectEqual(@as(usize, 1), model.functions.len);
+    try testing.expect(containsString(model.functions[0].declared, "left"));
+    try testing.expect(containsString(model.functions[0].declared, "right"));
+    try testing.expect(containsString(model.functions[0].declared, "count"));
+    try testing.expect(!containsString(model.functions[0].declared, "if"));
+}
+
+test "symbol model: lifecycle verbs require a word boundary" {
+    try testing.expect(classifyLifecycleVerb("close") == .cleanup);
+    try testing.expect(classifyLifecycleVerb("closeConn") == .cleanup);
+    try testing.expect(classifyLifecycleVerb("closestPoint") == null);
+    try testing.expect(classifyLifecycleVerb("starterPack") == null);
+}
+
+test "symbol model: Go embedded fields keep the type name" {
+    const src =
+        \\type Outer struct {
+        \\    sync.Mutex
+        \\    *pkg.Something
+        \\}
+    ;
+
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+    const masked = try types.maskSource(testing.allocator, src, .go);
+    defer testing.allocator.free(masked);
+    const masked_lines = try types.splitLines(testing.allocator, masked);
+    defer testing.allocator.free(masked_lines);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const model = try build(arena.allocator(), raw_lines, masked_lines, .go);
+    try testing.expectEqual(@as(usize, 1), model.types.len);
+    try testing.expectEqualStrings("Mutex", model.types[0].fields[0].name);
+    try testing.expectEqualStrings("Something", model.types[0].fields[1].name);
+}
+
+test "symbol model: Zig test blocks are analyzed as functions" {
+    const src =
+        \\test "runs setup" {
+        \\    try helper();
+        \\}
+    ;
+
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+    const masked = try types.maskSource(testing.allocator, src, .zig_lang);
+    defer testing.allocator.free(masked);
+    const masked_lines = try types.splitLines(testing.allocator, masked);
+    defer testing.allocator.free(masked_lines);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const model = try build(arena.allocator(), raw_lines, masked_lines, .zig_lang);
+    try testing.expectEqual(@as(usize, 1), model.functions.len);
+    try testing.expectEqualStrings("runs setup", model.functions[0].name);
 }

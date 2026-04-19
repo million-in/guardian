@@ -4,6 +4,7 @@ const guardian_config = @import("config.zig");
 const config_resolver = @import("config_resolver.zig");
 const reporting = @import("reporting.zig");
 const source_files = @import("source_files.zig");
+const test_config = @import("test_config.zig");
 const types = @import("types.zig");
 
 const Language = types.Language;
@@ -275,25 +276,27 @@ test "app: batch resolved configs support mixed monorepos" {
     try tmp.dir.makePath("pkg_a");
     try tmp.dir.makePath("pkg_b");
 
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    var pkg_a_cfg = loaded_default.value;
+    pkg_a_cfg.go.ban_generics = true;
+    const pkg_a_json = try test_config.stringify(testing.allocator, pkg_a_cfg);
+    defer testing.allocator.free(pkg_a_json);
+
     try tmp.dir.writeFile(.{
-        .sub_path = "pkg_a/.guardian.json",
-        .data =
-        \\{
-        \\  "go": {
-        \\    "ban_generics": true
-        \\  }
-        \\}
-        ,
+        .sub_path = "pkg_a/guardian.config.json",
+        .data = pkg_a_json,
     });
+
+    var pkg_b_cfg = loaded_default.value;
+    pkg_b_cfg.go.ban_generics = false;
+    const pkg_b_json = try test_config.stringify(testing.allocator, pkg_b_cfg);
+    defer testing.allocator.free(pkg_b_json);
+
     try tmp.dir.writeFile(.{
-        .sub_path = "pkg_b/.guardian.json",
-        .data =
-        \\{
-        \\  "go": {
-        \\    "ban_generics": false
-        \\  }
-        \\}
-        ,
+        .sub_path = "pkg_b/guardian.config.json",
+        .data = pkg_b_json,
     });
 
     try tmp.dir.writeFile(.{
@@ -338,15 +341,17 @@ test "app: batch resolved explicit absolute config path can be reused" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    var cfg = loaded_default.value;
+    cfg.go.ban_generics = false;
+    const config_json = try test_config.stringify(testing.allocator, cfg);
+    defer testing.allocator.free(config_json);
+
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.json",
-        .data =
-        \\{
-        \\  "go": {
-        \\    "ban_generics": false
-        \\  }
-        \\}
-        ,
+        .sub_path = "guardian.config.json",
+        .data = config_json,
     });
     try tmp.dir.writeFile(.{
         .sub_path = "a.go",
@@ -365,7 +370,7 @@ test "app: batch resolved explicit absolute config path can be reused" {
         ,
     });
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
     const file_a = try tmp.dir.realpathAlloc(testing.allocator, "a.go");
     defer testing.allocator.free(file_a);
@@ -385,17 +390,19 @@ test "app: explicit design limits apply through resolved configs" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    var cfg = loaded_default.value;
+    cfg.limits.max_function_arguments = 1;
+    cfg.limits.max_type_fields = 1;
+    cfg.limits.max_hidden_touch_excess = 0;
+    const config_json = try test_config.stringify(testing.allocator, cfg);
+    defer testing.allocator.free(config_json);
+
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.json",
-        .data =
-        \\{
-        \\  "limits": {
-        \\    "max_function_arguments": 1,
-        \\    "max_type_fields": 1,
-        \\    "max_hidden_touch_excess": 0
-        \\  }
-        \\}
-        ,
+        .sub_path = "guardian.config.json",
+        .data = config_json,
     });
     try tmp.dir.writeFile(.{
         .sub_path = "design.go",
@@ -413,7 +420,7 @@ test "app: explicit design limits apply through resolved configs" {
         ,
     });
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
     const file_path = try tmp.dir.realpathAlloc(testing.allocator, "design.go");
     defer testing.allocator.free(file_path);

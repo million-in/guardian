@@ -1,5 +1,6 @@
 const std = @import("std");
 const guardian_config = @import("config.zig");
+const test_config = @import("test_config.zig");
 
 const ConfigCacheEntry = struct {
     key: []const u8,
@@ -58,15 +59,17 @@ test "config resolver: explicit absolute config path can be reused across files"
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    var cfg = loaded_default.value;
+    cfg.go.ban_generics = false;
+    const config_json = try test_config.stringify(testing.allocator, cfg);
+    defer testing.allocator.free(config_json);
+
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.json",
-        .data =
-        \\{
-        \\  "go": {
-        \\    "ban_generics": false
-        \\  }
-        \\}
-        ,
+        .sub_path = "guardian.config.json",
+        .data = config_json,
     });
     try tmp.dir.writeFile(.{
         .sub_path = "a.go",
@@ -85,7 +88,7 @@ test "config resolver: explicit absolute config path can be reused across files"
         ,
     });
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
     const file_a = try tmp.dir.realpathAlloc(testing.allocator, "a.go");
     defer testing.allocator.free(file_a);

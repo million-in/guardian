@@ -1,5 +1,6 @@
 const std = @import("std");
 const guardian_config = @import("../config.zig");
+const test_config = @import("../test_config.zig");
 const types = @import("../types.zig");
 
 const Violation = types.Violation;
@@ -26,15 +27,7 @@ pub fn analyzeBraceComplexity(
 
     var current_func: ?FuncInfo = null;
     var brace_depth: i32 = 0;
-    var in_string = false;
     var in_block_comment = false;
-
-    const branch_keywords = switch (lang) {
-        .go => &[_][]const u8{ "if ", "else if ", "case ", "for ", "&&", "||" },
-        .typescript => &[_][]const u8{ "if ", "else if ", "case ", "for ", "while ", "&&", "||", "catch ", "? " },
-        .zig_lang => &[_][]const u8{ "if ", "else if ", "for ", "while ", "orelse", "catch ", "switch " },
-        .python => unreachable,
-    };
 
     for (lines, 0..) |line, line_idx| {
         const trimmed = std.mem.trimLeft(u8, line, " \t");
@@ -63,17 +56,9 @@ pub fn analyzeBraceComplexity(
             }
         }
 
-        // Track braces
-        in_string = false;
+        // Runs on masked input; strings and comments are already blanked.
         for (line, 0..) |ch, ci| {
             _ = ci;
-            if (ch == '"' and !in_string) {
-                in_string = true;
-            } else if (ch == '"' and in_string) {
-                in_string = false;
-            }
-            if (in_string) continue;
-
             if (ch == '{') {
                 brace_depth += 1;
                 if (is_func and current_func == null) {
@@ -105,13 +90,7 @@ pub fn analyzeBraceComplexity(
 
         // Count branch keywords in current function
         if (current_func != null) {
-            for (branch_keywords) |kw| {
-                var search_pos: usize = 0;
-                while (std.mem.indexOfPos(u8, trimmed, search_pos, kw)) |pos| {
-                    current_func.?.complexity += 1;
-                    search_pos = pos + kw.len;
-                }
-            }
+            current_func.?.complexity += countBraceComplexityLine(trimmed, lang);
         }
     }
 
@@ -130,11 +109,6 @@ pub fn analyzePythonComplexity(
     cfg: guardian_config.Config,
 ) ![]Violation {
     var violations = ViolationList.init(allocator);
-
-    const py_keywords = [_][]const u8{
-        "if ", "elif ", "for ", "while ", "except ", "except:",
-        " and ", " or ", " if ", // inline conditionals
-    };
 
     var func_name: []const u8 = "";
     var func_indent: ?u32 = null;
@@ -172,12 +146,7 @@ pub fn analyzePythonComplexity(
             }
 
             // Count branches
-            for (&py_keywords) |kw| {
-                if (std.mem.indexOf(u8, trimmed, kw) != null) {
-                    complexity += 1;
-                    break; // one per line max for keyword matches
-                }
-            }
+            complexity += countPythonComplexityLine(trimmed);
         }
     }
 
@@ -187,6 +156,133 @@ pub fn analyzePythonComplexity(
     }
 
     return violations.toOwnedSlice();
+}
+
+fn countBraceComplexityLine(trimmed: []const u8, lang: Language) u32 {
+    var count: u32 = 0;
+
+    switch (lang) {
+        .go => {
+            count += countIfBranches(trimmed);
+            count += countWord(trimmed, "case");
+            count += countWord(trimmed, "for");
+            count += countOperator(trimmed, "&&");
+            count += countOperator(trimmed, "||");
+        },
+        .typescript => {
+            count += countIfBranches(trimmed);
+            count += countWord(trimmed, "case");
+            count += countWord(trimmed, "for");
+            count += countWord(trimmed, "while");
+            count += countWord(trimmed, "catch");
+            count += countOperator(trimmed, "&&");
+            count += countOperator(trimmed, "||");
+            count += countTernaryOperators(trimmed);
+        },
+        .zig_lang => {
+            count += countIfBranches(trimmed);
+            count += countWord(trimmed, "for");
+            count += countWord(trimmed, "while");
+            count += countWord(trimmed, "switch");
+            count += countWord(trimmed, "catch");
+            count += countWord(trimmed, "orelse");
+        },
+        .python => unreachable,
+    }
+
+    return count;
+}
+
+fn countIfBranches(line: []const u8) u32 {
+    var count: u32 = 0;
+    var idx: usize = 0;
+
+    while (idx < line.len) : (idx += 1) {
+        if (idx + "else if".len <= line.len and
+            std.mem.eql(u8, line[idx .. idx + "else if".len], "else if") and
+            hasWordBoundary(line, idx, "else if".len))
+        {
+            count += 1;
+            idx += "else if".len - 1;
+            continue;
+        }
+
+        if (idx + "if".len <= line.len and
+            std.mem.eql(u8, line[idx .. idx + "if".len], "if") and
+            hasWordBoundary(line, idx, "if".len))
+        {
+            count += 1;
+            idx += "if".len - 1;
+        }
+    }
+
+    return count;
+}
+
+fn countPythonComplexityLine(trimmed: []const u8) u32 {
+    return countWord(trimmed, "elif") +
+        countWord(trimmed, "if") +
+        countWord(trimmed, "for") +
+        countWord(trimmed, "while") +
+        countWord(trimmed, "except") +
+        countWord(trimmed, "and") +
+        countWord(trimmed, "or");
+}
+
+fn countWord(line: []const u8, word: []const u8) u32 {
+    var count: u32 = 0;
+    var search_pos: usize = 0;
+    while (std.mem.indexOfPos(u8, line, search_pos, word)) |pos| {
+        if (hasWordBoundary(line, pos, word.len)) {
+            count += 1;
+        }
+        search_pos = pos + word.len;
+    }
+    return count;
+}
+
+fn hasWordBoundary(line: []const u8, start: usize, len: usize) bool {
+    if (start > 0 and isIdentifierChar(line[start - 1])) {
+        return false;
+    }
+
+    const end = start + len;
+    if (end < line.len and isIdentifierChar(line[end])) {
+        return false;
+    }
+
+    return true;
+}
+
+fn countOperator(line: []const u8, op: []const u8) u32 {
+    var count: u32 = 0;
+    var search_pos: usize = 0;
+    while (std.mem.indexOfPos(u8, line, search_pos, op)) |pos| {
+        count += 1;
+        search_pos = pos + op.len;
+    }
+    return count;
+}
+
+fn countTernaryOperators(line: []const u8) u32 {
+    var count: u32 = 0;
+    for (line, 0..) |ch, idx| {
+        if (ch != '?') {
+            continue;
+        }
+        if (idx + 1 < line.len and (line[idx + 1] == '?' or line[idx + 1] == '.')) {
+            continue;
+        }
+        if (idx > 0 and line[idx - 1] == '?') {
+            continue;
+        }
+        count += 1;
+    }
+    return count;
+}
+
+fn isIdentifierChar(ch: u8) bool {
+    return std.ascii.isAlphabetic(ch) or std.ascii.isDigit(ch) or ch == '_';
 }
 
 fn emitIfViolation(
@@ -270,14 +366,11 @@ fn emitPythonViolation(
 fn isFunctionLine(trimmed: []const u8, lang: Language) bool {
     return switch (lang) {
         .go => std.mem.startsWith(u8, trimmed, "func "),
-        .typescript => std.mem.startsWith(u8, trimmed, "function ") or
-            std.mem.startsWith(u8, trimmed, "export function ") or
-            std.mem.startsWith(u8, trimmed, "async function ") or
-            std.mem.startsWith(u8, trimmed, "export async function ") or
-            (std.mem.indexOf(u8, trimmed, "=>") != null and std.mem.indexOf(u8, trimmed, "const ") != null),
+        .typescript => looksLikeTsFunctionLine(trimmed),
         .zig_lang => std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "pub fn ") or
-            std.mem.startsWith(u8, trimmed, "export fn "),
+            std.mem.startsWith(u8, trimmed, "export fn ") or
+            std.mem.startsWith(u8, trimmed, "test "),
         .python => unreachable,
     };
 }
@@ -285,21 +378,58 @@ fn isFunctionLine(trimmed: []const u8, lang: Language) bool {
 fn extractFuncName(trimmed: []const u8, lang: Language) []const u8 {
     return switch (lang) {
         .go => extractGoFuncName(trimmed),
-        .typescript => extractNamedSymbol(trimmed, &[_][]const u8{
-            "export async function ",
-            "async function ",
-            "export function ",
-            "function ",
-            "const ",
-            "let ",
-        }),
+        .typescript => extractTsFunctionName(trimmed),
         .zig_lang => extractNamedSymbol(trimmed, &[_][]const u8{
             "pub fn ",
             "export fn ",
             "fn ",
+            "test ",
         }),
         .python => unreachable,
     };
+}
+
+fn looksLikeTsFunctionLine(trimmed: []const u8) bool {
+    if (startsWithAny(trimmed, &[_][]const u8{
+        "function ",
+        "export function ",
+        "async function ",
+        "export async function ",
+        "export default function ",
+        "export default async function ",
+    })) {
+        return true;
+    }
+
+    if (std.mem.indexOf(u8, trimmed, "=>") != null and startsWithAny(trimmed, &[_][]const u8{
+        "const ",
+        "let ",
+        "var ",
+        "export const ",
+        "export let ",
+        "export var ",
+    })) {
+        return true;
+    }
+
+    return false;
+}
+
+fn extractTsFunctionName(trimmed: []const u8) []const u8 {
+    return extractNamedSymbol(trimmed, &[_][]const u8{
+        "export default async function ",
+        "export default function ",
+        "export async function ",
+        "async function ",
+        "export function ",
+        "function ",
+        "export const ",
+        "export let ",
+        "export var ",
+        "const ",
+        "let ",
+        "var ",
+    });
 }
 
 fn extractPythonFuncName(trimmed: []const u8) []const u8 {
@@ -329,7 +459,10 @@ test "complexity: simple function passes" {
     const lines = try types.splitLines(testing.allocator, src);
     defer testing.allocator.free(lines);
 
-    const v = try analyzeBraceComplexity(testing.allocator, lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceComplexity(testing.allocator, lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
 }
@@ -351,7 +484,10 @@ test "complexity: high complexity triggers error" {
     const lines = try types.splitLines(testing.allocator, src);
     defer testing.allocator.free(lines);
 
-    const v = try analyzeBraceComplexity(testing.allocator, lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceComplexity(testing.allocator, lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
     try testing.expectEqual(Rule.cyclomatic_complexity, v[0].rule);
@@ -372,9 +508,63 @@ test "complexity: ignores template literal control-flow text" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeBraceComplexity(testing.allocator, masked_lines, .typescript, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceComplexity(testing.allocator, masked_lines, .typescript, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "complexity: Python counts each branch keyword on a line" {
+    const src =
+        \\def score(flag_a, flag_b, flag_c):
+        \\    if flag_a and flag_b or flag_c:
+        \\        return 1
+        \\    return 0
+    ;
+    const lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    var cfg = loaded.value;
+    cfg.limits.cyclomatic_complexity_warn = 3;
+    cfg.limits.cyclomatic_complexity_error = 99;
+
+    const v = try analyzePythonComplexity(testing.allocator, lines, cfg);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expect(v.len > 0);
+}
+
+test "complexity: else-if chains are not double counted" {
+    const src =
+        \\func branch(a int) int {
+        \\    if a == 0 {
+        \\        return 0
+        \\    } else if a == 1 {
+        \\        return 1
+        \\    } else if a == 2 {
+        \\        return 2
+        \\    }
+        \\    return 3
+        \\}
+    ;
+    const lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    var cfg = loaded.value;
+    cfg.limits.cyclomatic_complexity_warn = 3;
+    cfg.limits.cyclomatic_complexity_error = 99;
+
+    const v = try analyzeBraceComplexity(testing.allocator, lines, .go, cfg);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expect(v.len > 0);
+    try testing.expect(std.mem.indexOf(u8, v[0].message, "complexity 4") != null);
 }
 
 fn extractNamedSymbol(trimmed: []const u8, prefixes: []const []const u8) []const u8 {
@@ -383,16 +573,45 @@ fn extractNamedSymbol(trimmed: []const u8, prefixes: []const []const u8) []const
             continue;
         }
 
-        var search = trimmed[prefix.len..];
-        if (std.mem.startsWith(u8, prefix, "const ") or std.mem.startsWith(u8, prefix, "let ")) {
-            const eq_pos = std.mem.indexOf(u8, search, "=") orelse return "<anonymous>";
-            search = std.mem.trim(u8, search[0..eq_pos], " \t");
+        const after = trimmed[prefix.len..];
+        if (std.mem.eql(u8, prefix, "test ")) {
+            return extractQuotedSymbol(after, "<test>");
         }
+
+        const search = if (isBindingPrefix(prefix)) extractBindingTarget(after, "<anonymous>") else after;
 
         return trimIdentifier(search);
     }
 
     return "<anonymous>";
+}
+
+fn extractQuotedSymbol(after: []const u8, fallback: []const u8) []const u8 {
+    if (after.len < 2 or after[0] != '"') {
+        return fallback;
+    }
+    const end_quote = std.mem.indexOfScalarPos(u8, after, 1, '"') orelse return fallback;
+    return after[1..end_quote];
+}
+
+fn isBindingPrefix(prefix: []const u8) bool {
+    return std.mem.endsWith(u8, prefix, "const ") or
+        std.mem.endsWith(u8, prefix, "let ") or
+        std.mem.endsWith(u8, prefix, "var ");
+}
+
+fn extractBindingTarget(after: []const u8, fallback: []const u8) []const u8 {
+    const eq_pos = std.mem.indexOf(u8, after, "=") orelse return fallback;
+    return std.mem.trim(u8, after[0..eq_pos], " \t");
+}
+
+fn startsWithAny(text: []const u8, prefixes: []const []const u8) bool {
+    for (prefixes) |prefix| {
+        if (std.mem.startsWith(u8, text, prefix)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn extractGoFuncName(trimmed: []const u8) []const u8 {

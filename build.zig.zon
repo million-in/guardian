@@ -77,7 +77,7 @@
         "README.md",
         "LICENSE",
         "flake.nix",
-        "guardian.config.example.json",
+        "guardian.config.json",
         "plugin.mcp.json",
         "src",
         "scripts",

@@ -1,5 +1,6 @@
 const std = @import("std");
 const guardian_config = @import("../config.zig");
+const test_config = @import("../test_config.zig");
 const types = @import("../types.zig");
 
 const Violation = types.Violation;
@@ -88,7 +89,7 @@ pub fn analyzeFormatting(
     if (tab_lines > 0 and space_lines > 0) {
         // Go uses tabs, others use spaces. Flag mismatch.
         const expected_tabs = (lang == .go);
-        if (expected_tabs and space_lines > tab_lines / 4) {
+        if (expected_tabs and space_lines * 4 > tab_lines) {
             try violations.append(.{
                 .line = 1,
                 .column = 0,
@@ -97,7 +98,7 @@ pub fn analyzeFormatting(
                 .severity = .@"error",
                 .message = "Go files should use tabs — found significant space-indented lines",
             });
-        } else if (!expected_tabs and tab_lines > space_lines / 4) {
+        } else if (!expected_tabs and tab_lines * 4 > space_lines) {
             try violations.append(.{
                 .line = 1,
                 .column = 0,
@@ -143,7 +144,30 @@ test "formatting: detects long lines" {
     const long_line = buf[0..];
 
     const lines_arr = [_][]const u8{long_line};
-    const v = try analyzeFormatting(testing.allocator, &lines_arr, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeFormatting(testing.allocator, &lines_arr, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
+}
+
+test "formatting: small Go files tolerate one space-indented line" {
+    const lines_arr = [_][]const u8{
+        "\tif cond {",
+        "\t\treturn",
+        "\t}",
+        "\tconst value = 1",
+        "    // aligned comment",
+    };
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeFormatting(testing.allocator, &lines_arr, .go, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+
+    for (v) |violation| {
+        try testing.expect(violation.rule != .inconsistent_indent);
+    }
 }

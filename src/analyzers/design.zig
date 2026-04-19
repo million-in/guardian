@@ -1,6 +1,7 @@
 const std = @import("std");
 const guardian_config = @import("../config.zig");
 const symbol_model = @import("../symbol_model.zig");
+const test_config = @import("../test_config.zig");
 const types = @import("../types.zig");
 
 const Language = types.Language;
@@ -315,7 +316,10 @@ test "design: Go detects too many arguments and hidden coupling" {
     const masked_lines = try types.splitLines(testing.allocator, masked);
     defer testing.allocator.free(masked_lines);
 
-    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, violations);
 
     try testing.expect(hasRule(violations, .too_many_arguments));
@@ -354,7 +358,10 @@ test "design: TypeScript class reports temporal coupling, boolean state machine,
     const masked_lines = try types.splitLines(testing.allocator, masked);
     defer testing.allocator.free(masked_lines);
 
-    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .typescript, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .typescript, loaded.value);
     defer types.freeViolations(testing.allocator, violations);
 
     try testing.expect(hasRule(violations, .temporal_coupling));
@@ -386,7 +393,10 @@ test "design: Python explicit state suppresses boolean state machine" {
     const masked_lines = try types.splitLines(testing.allocator, masked);
     defer testing.allocator.free(masked_lines);
 
-    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .python, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .python, loaded.value);
     defer types.freeViolations(testing.allocator, violations);
 
     try testing.expect(!hasRule(violations, .boolean_state_machine));
@@ -394,23 +404,11 @@ test "design: Python explicit state suppresses boolean state machine" {
 }
 
 test "design: Zig struct field limit and scoped cleanup behavior are handled" {
-    const cfg = guardian_config.Config{
-        .limits = .{
-            .max_nesting = 3,
-            .cyclomatic_complexity_warn = 6,
-            .cyclomatic_complexity_error = 8,
-            .max_imports = 15,
-            .max_functions_per_file = 15,
-            .max_function_lines = 50,
-            .max_function_arguments = 6,
-            .max_type_fields = 3,
-            .max_hidden_touch_excess = 0,
-            .max_lifecycle_flags = 2,
-            .max_line_length = 120,
-            .max_excerpt_lines = 12,
-            .max_excerpt_chars = 1600,
-        },
-    };
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    var cfg = loaded.value;
+    cfg.limits.max_type_fields = 3;
 
     const src =
         \\const Session = struct {
@@ -437,6 +435,38 @@ test "design: Zig struct field limit and scoped cleanup behavior are handled" {
 
     try testing.expect(hasRule(violations, .too_many_fields));
     try testing.expect(!hasRule(violations, .ambiguous_lifecycle_ownership));
+}
+
+test "design: Go imports and builtins do not trigger hidden coupling by themselves" {
+    const src =
+        \\package sample
+        \\
+        \\import (
+        \\    "context"
+        \\    "errors"
+        \\    "fmt"
+        \\)
+        \\
+        \\func Log(ctx context.Context, err error) {
+        \\    fmt.Println(errors.Is(err, context.Canceled), len([]int{1, 2, 3}))
+        \\    _ = ctx
+        \\}
+    ;
+
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+    const masked = try types.maskSource(testing.allocator, src, .go);
+    defer testing.allocator.free(masked);
+    const masked_lines = try types.splitLines(testing.allocator, masked);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const violations = try analyzeDesign(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
+    defer types.freeViolations(testing.allocator, violations);
+
+    try testing.expect(!hasRule(violations, .hidden_coupling));
 }
 
 fn hasRule(violations: []const Violation, rule: Rule) bool {

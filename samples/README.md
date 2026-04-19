@@ -39,10 +39,10 @@ Quick CLI folder test:
 Config override example:
 
 ```zsh
-./zig-out/bin/gd analyze samples/zig_bad.zig --json --config guardian.config.example.json | jq .
+./zig-out/bin/gd analyze samples/zig_bad.zig --json --config guardian.config.json | jq .
 ```
 
-The CLI auto-loads `.guardian.json` or `guardian.json` from the target path upward. Use `guardian.config.example.json` as a starting point for your own config. On a terminal, `gd ... --json` still shows the pretty colored report; when piped to `jq`, it emits raw JSON. Use `--raw-json` to force JSON directly in the terminal.
+The CLI auto-loads `guardian.config.json` from the target path upward. The release packages also ship a `guardian.config.json` fallback next to the binaries. Use `guardian.config.json` as the starting point for your own config. On a terminal, `gd ... --json` still shows the pretty colored report; when piped to `jq`, it emits raw JSON. Use `--raw-json` to force JSON directly in the terminal.
 
 Quick MCP single-file test:
 

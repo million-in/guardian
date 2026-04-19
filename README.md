@@ -178,13 +178,13 @@ Scope controls (`public_only` or `all`) determine whether rules apply to interna
 ### Cohesion and Coupling
 
 - **Import count**: `error` when file exceeds `max_imports` (default: 15)
-- **Function count**: `error` when file exceeds `max_functions_per_file` (default: 15)
-- **Function length**: `warn` when any function exceeds `max_function_lines` (default: 50)
+- **Function count**: `error` when file exceeds `max_functions_per_file` (default: 16)
+- **Function length**: `warn` when any function exceeds `max_function_lines` (default: 80)
 
 ### Design Rules
 
-- **Too many arguments**: `error` when a function or method exceeds `max_function_arguments` (default: 6)
-- **Too many fields**: `error` when a struct, class, interface, or object-shape type exceeds `max_type_fields` (default: 10)
+- **Too many arguments**: `error` when a function or method exceeds `max_function_arguments` (default: 3)
+- **Too many fields**: `error` when a struct, class, interface, or object-shape type exceeds `max_type_fields` (default: 12)
 - **Hidden coupling**: `warn` when a function touches more external dependencies than its declared inputs plus `max_hidden_touch_excess` (default excess: 0)
 - **Temporal coupling**: `error` when lifecycle methods depend on call order enforced only by boolean flags or ad hoc checks
 - **Boolean state machine**: `error` when a type models lifecycle with more than `max_lifecycle_flags` booleans instead of one explicit state
@@ -199,9 +199,9 @@ Scope controls (`public_only` or `all`) determine whether rules apply to interna
 
 ## Configuration
 
-Guardian auto-discovers `.guardian.json` or `guardian.json` by walking up from the target file's directory. Use `--config path` to specify an explicit config file.
+Guardian auto-discovers `guardian.config.json` by walking up from the target file's directory. If the target tree does not provide one, Guardian falls back to the packaged `guardian.config.json`. Use `--config path` to specify an explicit config file.
 
-See `guardian.config.example.json` for a complete reference. Key sections:
+See `guardian.config.json` for the shipped default config. Key sections:
 
 ```json
 {
@@ -212,7 +212,7 @@ See `guardian.config.example.json` for a complete reference. Key sections:
     "max_imports": 15,
     "max_functions_per_file": 16,
     "max_function_lines": 80,
-    "max_function_arguments": 7,
+    "max_function_arguments": 3,
     "max_type_fields": 12,
     "max_hidden_touch_excess": 2,
     "max_lifecycle_flags": 2,
@@ -265,7 +265,7 @@ Overrides are applied in order; later overrides take precedence for the same fie
 
 ### Monorepo Support
 
-In batch and folder modes, Guardian resolves config independently per file by walking up from each file's directory. This means different subdirectories can have their own `.guardian.json` with distinct rules. Config resolution results are cached per discovered config path to avoid redundant I/O.
+In batch and folder modes, Guardian resolves config independently per file by walking up from each file's directory. This means different subdirectories can have their own `guardian.config.json` with distinct rules. Config resolution results are cached per discovered config path to avoid redundant I/O.
 
 ## Output Formats
 

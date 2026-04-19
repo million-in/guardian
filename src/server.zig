@@ -4,6 +4,7 @@ const app = @import("app.zig");
 const guardian_config = @import("config.zig");
 const jsonrpc = @import("jsonrpc.zig");
 const protocol_parse = @import("protocol_parse.zig");
+const test_config = @import("test_config.zig");
 
 const JsonValue = jsonrpc.JsonValue;
 
@@ -23,6 +24,7 @@ const Message = struct {
 };
 
 const Method = protocol_parse.Method;
+const max_content_length_bytes = 64 * 1024 * 1024;
 
 pub fn run(allocator: std.mem.Allocator) !void {
     const stdin = std.fs.File.stdin().deprecatedReader();
@@ -134,6 +136,9 @@ fn consumeHeaders(reader: anytype, line_buf: []u8) !void {
 }
 
 fn readPayloadBytes(allocator: std.mem.Allocator, reader: anytype, content_length: usize) ![]u8 {
+    if (content_length > max_content_length_bytes) {
+        return error.PayloadTooLarge;
+    }
     const payload = try allocator.alloc(u8, content_length);
     errdefer allocator.free(payload);
     try reader.readNoEof(payload);
@@ -340,6 +345,9 @@ fn handleAnalyzeFolder(
         return try jsonrpc.formatError(allocator, id, -32602, "missing path");
     };
     const config_path = protocol_parse.getOptionalStringField(arguments_object, "config_path");
+    validateAnalyzeFolderPath(allocator, folder_path, config_path) catch |err| {
+        return handleAnalyzeFolderError(allocator, id, err);
+    };
 
     var batch = app.analyzeFolderResolved(allocator, folder_path, config_path) catch |err| {
         return handleAnalyzeFolderError(allocator, id, err);
@@ -378,8 +386,47 @@ fn handleAnalyzeFolderError(
             -32602,
             "folder does not contain supported source files",
         ),
+        error.PathOutsideAllowedRoots => jsonrpc.formatError(
+            allocator,
+            id,
+            -32602,
+            "path must stay within the working directory or config root",
+        ),
         else => err,
     };
+}
+
+fn validateAnalyzeFolderPath(
+    allocator: std.mem.Allocator,
+    folder_path: []const u8,
+    config_path: ?[]const u8,
+) !void {
+    const absolute_folder = try std.fs.realpathAlloc(allocator, folder_path);
+    defer allocator.free(absolute_folder);
+
+    var loaded_cfg = try guardian_config.loadForTarget(allocator, absolute_folder, config_path);
+    defer loaded_cfg.deinit();
+
+    const cwd_root = try std.fs.realpathAlloc(allocator, ".");
+    defer allocator.free(cwd_root);
+
+    if (isPathWithinRoot(absolute_folder, cwd_root) or isPathWithinRoot(absolute_folder, loaded_cfg.value.root_path)) {
+        return;
+    }
+
+    return error.PathOutsideAllowedRoots;
+}
+
+fn isPathWithinRoot(path: []const u8, root: []const u8) bool {
+    if (root.len == 0 or !std.mem.startsWith(u8, path, root)) {
+        return false;
+    }
+    if (path.len == root.len) {
+        return true;
+    }
+
+    const next = path[root.len];
+    return next == '/' or next == '\\';
 }
 
 const SUPPORTED_PROTOCOL_VERSION = "2025-11-25";
@@ -559,6 +606,16 @@ test "protocol: analyze_folder scans supported files recursively" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    const config_json = try test_config.stringify(testing.allocator, loaded_default.value);
+    defer testing.allocator.free(config_json);
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "guardian.config.json",
+        .data = config_json,
+    });
     try tmp.dir.makePath("pkg/nested");
     try tmp.dir.writeFile(.{
         .sub_path = "pkg/nested/main.go",
@@ -591,19 +648,54 @@ test "protocol: analyze_folder scans supported files recursively" {
     try testing.expect(std.mem.indexOf(u8, response.?, "interface{}") != null);
 }
 
+test "protocol: analyze_folder rejects paths outside cwd and config root" {
+    const tmp_root = try std.fmt.allocPrint(
+        testing.allocator,
+        "/tmp/guardian-server-{d}",
+        .{std.time.microTimestamp()},
+    );
+    defer testing.allocator.free(tmp_root);
+    defer std.fs.deleteTreeAbsolute(tmp_root) catch {};
+
+    try std.fs.makeDirAbsolute(tmp_root);
+    const tmp_pkg = try std.fs.path.join(testing.allocator, &.{ tmp_root, "pkg" });
+    defer testing.allocator.free(tmp_pkg);
+    try std.fs.makeDirAbsolute(tmp_pkg);
+
+    const file_path = try std.fs.path.join(testing.allocator, &.{ tmp_pkg, "main.go" });
+    defer testing.allocator.free(file_path);
+    const file = try std.fs.createFileAbsolute(file_path, .{});
+    defer file.close();
+    try file.writeAll("package main\n");
+
+    const request = try buildAnalyzeFolderRequest(testing.allocator, tmp_pkg);
+    defer testing.allocator.free(request);
+
+    const framed_request = try jsonrpc.frameMessage(testing.allocator, request);
+    defer testing.allocator.free(framed_request);
+
+    const response = try processInput(testing.allocator, framed_request);
+    try testing.expect(response != null);
+    defer testing.allocator.free(response.?);
+
+    try testing.expect(std.mem.indexOf(u8, response.?, "path must stay within the working directory or config root") != null);
+}
+
 test "protocol: analyze_folder supports explicit absolute config path via tools/call" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    var cfg = loaded_default.value;
+    cfg.go.ban_generics = false;
+    const config_json = try test_config.stringify(testing.allocator, cfg);
+    defer testing.allocator.free(config_json);
+
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.json",
-        .data =
-        \\{
-        \\  "go": {
-        \\    "ban_generics": false
-        \\  }
-        \\}
-        ,
+        .sub_path = "guardian.config.json",
+        .data = config_json,
     });
     try tmp.dir.makePath("pkg/nested");
     try tmp.dir.writeFile(.{
@@ -625,7 +717,7 @@ test "protocol: analyze_folder supports explicit absolute config path via tools/
 
     const absolute_folder = try tmp.dir.realpathAlloc(testing.allocator, "pkg");
     defer testing.allocator.free(absolute_folder);
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.json");
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
 
     const request = try buildAnalyzeFolderToolCallRequest(
@@ -659,7 +751,7 @@ test "protocol: analyze request surfaces design rule ids" {
         \\    "name":"analyze",
         \\    "arguments":{
         \\      "file_path":"design.go",
-        \\      "source":"func Build(a int, b int, c int, d int, e int, f int, g int) int {\n    return run(pkg.Load(), repo.Fetch(), service.Call(), config.Read(), metrics.Emit(), clock.Now(), audit.Track(), cache.Hit())\n}"
+        \\      "source":"func Build(a int, b int, c int, d int) int {\n    return run(pkg.Load(), repo.Fetch(), service.Call(), config.Read(), metrics.Emit(), clock.Now(), audit.Track(), cache.Hit())\n}"
         \\    }
         \\  }
         \\}
@@ -674,6 +766,11 @@ test "protocol: analyze request surfaces design rule ids" {
 
     try testing.expect(std.mem.indexOf(u8, response.?, "too_many_arguments") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "hidden_coupling") != null);
+}
+
+test "protocol: rejects oversized framed payloads before allocation" {
+    const request = "Content-Length: 67108865\r\n\r\n";
+    try testing.expectError(error.PayloadTooLarge, processInput(testing.allocator, request));
 }
 
 fn buildAnalyzeFolderRequest(allocator: std.mem.Allocator, folder_path: []const u8) ![]u8 {

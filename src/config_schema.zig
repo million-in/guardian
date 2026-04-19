@@ -16,19 +16,19 @@ pub const Pattern = struct {
 };
 
 pub const Limits = struct {
-    max_nesting: u32 = 3,
-    cyclomatic_complexity_warn: u32 = 6,
-    cyclomatic_complexity_error: u32 = 8,
-    max_imports: u32 = 15,
-    max_functions_per_file: u32 = 15,
-    max_function_lines: u32 = 50,
-    max_function_arguments: u32 = 3,
-    max_type_fields: u32 = 10,
-    max_hidden_touch_excess: u32 = 0,
-    max_lifecycle_flags: u32 = 2,
-    max_line_length: u32 = 120,
-    max_excerpt_lines: u32 = 12,
-    max_excerpt_chars: u32 = 1600,
+    max_nesting: u32,
+    cyclomatic_complexity_warn: u32,
+    cyclomatic_complexity_error: u32,
+    max_imports: u32,
+    max_functions_per_file: u32,
+    max_function_lines: u32,
+    max_function_arguments: u32,
+    max_type_fields: u32,
+    max_hidden_touch_excess: u32,
+    max_lifecycle_flags: u32,
+    max_line_length: u32,
+    max_excerpt_lines: u32,
+    max_excerpt_chars: u32,
 };
 
 pub const LimitsPatch = struct {
@@ -48,19 +48,19 @@ pub const LimitsPatch = struct {
 };
 
 pub const Scan = struct {
-    extensions: []const []const u8 = &default_extensions,
-    ignored_dirs: []const []const u8 = &default_ignored_dirs,
+    extensions: []const []const u8,
+    ignored_dirs: []const []const u8,
 };
 
 pub const GoRules = struct {
-    ban_interface_empty: bool = true,
-    ban_map_string_interface_empty: bool = true,
-    warn_type_switch: bool = true,
-    ban_unchecked_type_assertions: bool = true,
-    ban_generics: bool = true,
-    surface_scope: SurfaceScope = .public_only,
-    generic_scope: SurfaceScope = .public_only,
-    extra_banned_patterns: []const Pattern = &.{},
+    ban_interface_empty: bool,
+    ban_map_string_interface_empty: bool,
+    warn_type_switch: bool,
+    ban_unchecked_type_assertions: bool,
+    ban_generics: bool,
+    surface_scope: SurfaceScope,
+    generic_scope: SurfaceScope,
+    extra_banned_patterns: []const Pattern,
 };
 
 pub const GoRulesPatch = struct {
@@ -75,11 +75,11 @@ pub const GoRulesPatch = struct {
 };
 
 pub const TypeScriptRules = struct {
-    ban_any: bool = true,
-    ban_as_any: bool = true,
-    ban_ts_ignore: bool = true,
-    warn_ts_expect_error: bool = true,
-    extra_banned_patterns: []const Pattern = &.{},
+    ban_any: bool,
+    ban_as_any: bool,
+    ban_ts_ignore: bool,
+    warn_ts_expect_error: bool,
+    extra_banned_patterns: []const Pattern,
 };
 
 pub const TypeScriptRulesPatch = struct {
@@ -91,13 +91,13 @@ pub const TypeScriptRulesPatch = struct {
 };
 
 pub const PythonRules = struct {
-    ban_type_ignore: bool = true,
-    warn_import_any: bool = true,
-    ban_any_annotation: bool = true,
-    warn_bare_dict: bool = true,
-    warn_bare_list: bool = true,
-    warn_missing_return_annotation: bool = true,
-    extra_banned_patterns: []const Pattern = &.{},
+    ban_type_ignore: bool,
+    warn_import_any: bool,
+    ban_any_annotation: bool,
+    warn_bare_dict: bool,
+    warn_bare_list: bool,
+    warn_missing_return_annotation: bool,
+    extra_banned_patterns: []const Pattern,
 };
 
 pub const PythonRulesPatch = struct {
@@ -111,12 +111,12 @@ pub const PythonRulesPatch = struct {
 };
 
 pub const ZigRules = struct {
-    warn_ptr_cast: bool = true,
-    warn_int_cast: bool = true,
-    warn_anytype: bool = true,
-    cast_scope: SurfaceScope = .public_only,
-    anytype_scope: SurfaceScope = .public_only,
-    extra_banned_patterns: []const Pattern = &.{},
+    warn_ptr_cast: bool,
+    warn_int_cast: bool,
+    warn_anytype: bool,
+    cast_scope: SurfaceScope,
+    anytype_scope: SurfaceScope,
+    extra_banned_patterns: []const Pattern,
 };
 
 pub const ZigRulesPatch = struct {
@@ -162,12 +162,12 @@ pub const Override = struct {
 
 pub const Config = struct {
     root_path: []const u8 = "",
-    limits: Limits = .{},
-    scan: Scan = .{},
-    go: GoRules = .{},
-    typescript: TypeScriptRules = .{},
-    python: PythonRules = .{},
-    zig: ZigRules = .{},
+    limits: Limits,
+    scan: Scan,
+    go: GoRules,
+    typescript: TypeScriptRules,
+    python: PythonRules,
+    zig: ZigRules,
     overrides: []const Override = &.{},
 
     pub fn isSupportedPath(self: Config, path: []const u8) bool {
@@ -216,25 +216,6 @@ pub const Config = struct {
         }
         return if (relative.len == 0) "." else relative;
     }
-};
-
-const default_extensions = [_][]const u8{
-    ".go",
-    ".ts",
-    ".tsx",
-    ".py",
-    ".zig",
-};
-
-const default_ignored_dirs = [_][]const u8{
-    ".git",
-    ".zig-cache",
-    "zig-out",
-    "node_modules",
-    "vendor",
-    "dist",
-    "build",
-    "__pycache__",
 };
 
 fn applyLimitsPatch(target: *Limits, patch: LimitsPatch) void {
@@ -324,24 +305,27 @@ fn applyOptionalField(
 }
 
 const testing = std.testing;
+const test_config = @import("test_config.zig");
 
 test "config schema: applies path and role overrides" {
-    const base = Config{
-        .root_path = "/repo",
-        .overrides = &[_]Override{
-            .{
-                .path_prefixes = &[_][]const u8{"src/analyzers/"},
-                .limits = .{
-                    .max_function_lines = 120,
-                    .max_line_length = 160,
-                    .max_function_arguments = 8,
-                },
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    var base = loaded.value;
+    base.root_path = "/repo";
+    base.overrides = &[_]Override{
+        .{
+            .path_prefixes = &[_][]const u8{"src/analyzers/"},
+            .limits = .{
+                .max_function_lines = 120,
+                .max_line_length = 160,
+                .max_function_arguments = 8,
             },
-            .{
-                .roles = &[_][]const u8{"test"},
-                .go = .{
-                    .ban_generics = false,
-                },
+        },
+        .{
+            .roles = &[_][]const u8{"test"},
+            .go = .{
+                .ban_generics = false,
             },
         },
     };

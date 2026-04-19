@@ -9,7 +9,7 @@ trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
 red="$(printf '\033[31m')"
 gray="$(printf '\033[90m')"
-absolute_config="$ROOT/guardian.config.example.json"
+absolute_config="$ROOT/guardian.config.json"
 
 ./zig-out/bin/gd analyze samples/go_bad.go > "$tmp_dir/analyze.pretty"
 grep -F "samples/go_bad.go" "$tmp_dir/analyze.pretty" >/dev/null

@@ -1,5 +1,6 @@
 const std = @import("std");
 const guardian_config = @import("../config.zig");
+const test_config = @import("../test_config.zig");
 const types = @import("../types.zig");
 
 const Language = types.Language;
@@ -17,99 +18,77 @@ pub fn analyzeBraceNesting(
 ) ![]Violation {
     var violations = ViolationList.init(allocator);
 
-    var brace_depth: i32 = 0;
-    var func_base_depth: i32 = 0;
-    var in_function = false;
-    var func_start_line: u32 = 0;
-    var max_seen: u32 = 0;
-    var max_seen_line: u32 = 0;
-    var in_string = false;
-    var in_line_comment = false;
-    var in_block_comment = false;
+    var brace_stack = std.array_list.Managed(BraceKind).init(allocator);
+    defer brace_stack.deinit();
+
+    var function_stack = std.array_list.Managed(FunctionFrame).init(allocator);
+    defer function_stack.deinit();
+
+    var control_depth: u32 = 0;
 
     for (lines, 0..) |line, line_idx| {
-        in_line_comment = false;
-        var i: usize = 0;
+        // Runs on masked input; strings and comments are already blanked.
+        for (line, 0..) |ch, idx| {
+            switch (ch) {
+                '{' => {
+                    const before_brace = std.mem.trim(u8, line[0..idx], " \t");
+                    const kind = classifyBraceOpen(before_brace, lang);
+                    try brace_stack.append(kind);
 
-        while (i < line.len) : (i += 1) {
-            const ch = line[i];
-
-            // Track block comments
-            if (in_block_comment) {
-                if (ch == '*' and i + 1 < line.len and line[i + 1] == '/') {
-                    in_block_comment = false;
-                    i += 1;
-                }
-                continue;
-            }
-
-            // Track line comments
-            if (!in_string and ch == '/' and i + 1 < line.len) {
-                if (line[i + 1] == '/') {
-                    in_line_comment = true;
-                    break;
-                }
-                if (line[i + 1] == '*') {
-                    in_block_comment = true;
-                    i += 1;
-                    continue;
-                }
-            }
-
-            if (in_line_comment) break;
-
-            // Track strings (basic — doesn't handle raw strings)
-            if (ch == '"' and (i == 0 or line[i - 1] != '\\')) {
-                in_string = !in_string;
-                continue;
-            }
-            if (in_string) continue;
-
-            // Track braces
-            if (ch == '{') {
-                brace_depth += 1;
-
-                // Detect function entry: look back for func/fn/function keyword
-                if (!in_function) {
-                    const trimmed = std.mem.trim(u8, line[0..i], " \t");
-                    if (looksLikeFunctionDef(trimmed, lang)) {
-                        in_function = true;
-                        func_base_depth = brace_depth;
-                        func_start_line = try types.usizeToU32(line_idx);
-                        max_seen = 0;
-                        max_seen_line = try types.usizeToU32(line_idx);
+                    switch (kind) {
+                        .function_block => {
+                            try function_stack.append(.{
+                                .func_start_line = try types.usizeToU32(line_idx),
+                                .max_seen = 0,
+                                .max_seen_line = try types.usizeToU32(line_idx),
+                                .base_control_depth = control_depth,
+                            });
+                        },
+                        .control_block => {
+                            control_depth += 1;
+                            if (function_stack.items.len > 0) {
+                                const current = &function_stack.items[function_stack.items.len - 1];
+                                const relative = control_depth - current.base_control_depth;
+                                if (relative > current.max_seen) {
+                                    current.max_seen = relative;
+                                    current.max_seen_line = try types.usizeToU32(line_idx);
+                                }
+                            }
+                        },
+                        .literal_block => {},
                     }
-                }
-
-                if (in_function) {
-                    const relative = try types.i32ToU32(@max(0, brace_depth - func_base_depth));
-                    if (relative > max_seen) {
-                        max_seen = relative;
-                        max_seen_line = try types.usizeToU32(line_idx);
+                },
+                '}' => {
+                    if (brace_stack.items.len == 0) {
+                        continue;
                     }
-                }
-            } else if (ch == '}') {
-                if (in_function and brace_depth == func_base_depth) {
-                    // Function closed — report if max exceeded
-                    if (max_seen > cfg.limits.max_nesting) {
-                        try violations.append(.{
-                            .line = max_seen_line + 1,
-                            .column = 0,
-                            .end_line = try types.indexToLineNumber(line_idx),
-                            .rule = .nesting_depth,
-                            .severity = .@"error",
-                            .message = try std.fmt.allocPrint(
+
+                    const kind = brace_stack.pop().?;
+                    switch (kind) {
+                        .function_block => {
+                            if (function_stack.items.len == 0) {
+                                continue;
+                            }
+                            const frame = function_stack.pop().?;
+                            try emitBraceViolation(
                                 allocator,
-                                "nesting depth {d} exceeds maximum of {d} (function at line {d})",
-                                .{ max_seen, cfg.limits.max_nesting, func_start_line + 1 },
-                            ),
-                            .message_owned = true,
-                        });
+                                &violations,
+                                frame.func_start_line,
+                                frame.max_seen_line,
+                                frame.max_seen,
+                                try types.indexToLineNumber(line_idx),
+                                cfg,
+                            );
+                        },
+                        .control_block => {
+                            if (control_depth > 0) {
+                                control_depth -= 1;
+                            }
+                        },
+                        .literal_block => {},
                     }
-                    in_function = false;
-                }
-                brace_depth -= 1;
-                if (brace_depth < 0) brace_depth = 0;
+                },
+                else => {},
             }
         }
     }
@@ -172,7 +151,10 @@ pub fn analyzePythonNesting(
                     try indent_stack.append(ws);
                 }
 
-                const relative = try types.usizeToU32(indent_stack.items.len - 1);
+                const relative = if (indent_stack.items.len >= 2)
+                    try types.usizeToU32(indent_stack.items.len - 2)
+                else
+                    0;
                 if (relative > max_depth) {
                     max_depth = relative;
                     max_depth_line = try types.usizeToU32(line_idx);
@@ -217,21 +199,144 @@ fn emitPythonViolation(
     });
 }
 
+const BraceKind = enum {
+    function_block,
+    control_block,
+    literal_block,
+};
+
+const FunctionFrame = struct {
+    func_start_line: u32,
+    max_seen: u32,
+    max_seen_line: u32,
+    base_control_depth: u32,
+};
+
+fn emitBraceViolation(
+    allocator: std.mem.Allocator,
+    violations: *ViolationList,
+    func_start_line: u32,
+    max_depth_line: u32,
+    max_depth: u32,
+    end_line: u32,
+    cfg: guardian_config.Config,
+) !void {
+    if (max_depth <= cfg.limits.max_nesting) {
+        return;
+    }
+
+    try violations.append(.{
+        .line = max_depth_line + 1,
+        .column = 0,
+        .end_line = end_line,
+        .rule = .nesting_depth,
+        .severity = .@"error",
+        .message = try std.fmt.allocPrint(
+            allocator,
+            "nesting depth {d} exceeds maximum of {d} (function at line {d})",
+            .{ max_depth, cfg.limits.max_nesting, func_start_line + 1 },
+        ),
+        .message_owned = true,
+    });
+}
+
+fn classifyBraceOpen(before_brace: []const u8, lang: Language) BraceKind {
+    if (looksLikeFunctionDef(before_brace, lang)) {
+        return .function_block;
+    }
+    if (looksLikeControlBlock(before_brace, lang)) {
+        return .control_block;
+    }
+    return .literal_block;
+}
+
+fn looksLikeControlBlock(before_brace: []const u8, lang: Language) bool {
+    return switch (lang) {
+        .go => startsWithAny(before_brace, &[_][]const u8{
+            "if ",
+            "else if ",
+            "else",
+            "for ",
+            "switch ",
+            "select",
+        }),
+        .typescript => startsWithAny(before_brace, &[_][]const u8{
+            "if ",
+            "else if ",
+            "else",
+            "for ",
+            "while ",
+            "switch ",
+            "catch ",
+            "try",
+            "finally",
+            "do",
+        }),
+        .zig_lang => startsWithAny(before_brace, &[_][]const u8{
+            "if ",
+            "else if ",
+            "else",
+            "for ",
+            "while ",
+            "switch ",
+            "catch ",
+            "orelse",
+        }),
+        .python => false,
+    };
+}
+
 fn looksLikeFunctionDef(before_brace: []const u8, lang: Language) bool {
     const trimmed = std.mem.trim(u8, before_brace, " \t");
 
     return switch (lang) {
         .go => std.mem.startsWith(u8, trimmed, "func "),
-        .typescript => std.mem.startsWith(u8, trimmed, "function ") or
-            std.mem.startsWith(u8, trimmed, "export function ") or
-            std.mem.startsWith(u8, trimmed, "async function ") or
-            std.mem.startsWith(u8, trimmed, "export async function ") or
-            (std.mem.indexOf(u8, trimmed, "=>") != null and std.mem.indexOf(u8, trimmed, "=") != null),
+        .typescript => looksLikeTsFunctionBeforeBrace(trimmed),
         .zig_lang => std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "pub fn ") or
-            std.mem.startsWith(u8, trimmed, "export fn "),
+            std.mem.startsWith(u8, trimmed, "export fn ") or
+            std.mem.startsWith(u8, trimmed, "test "),
         .python => false,
     };
+}
+
+fn looksLikeTsFunctionBeforeBrace(trimmed: []const u8) bool {
+    if (startsWithAny(trimmed, &[_][]const u8{
+        "function ",
+        "export function ",
+        "async function ",
+        "export async function ",
+        "export default function ",
+        "export default async function ",
+    })) {
+        return true;
+    }
+
+    if (std.mem.indexOf(u8, trimmed, "=>") != null) {
+        return true;
+    }
+
+    if (looksLikeControlBlock(trimmed, .typescript)) {
+        return false;
+    }
+
+    return std.mem.indexOfScalar(u8, trimmed, '(') != null and
+        !startsWithAny(trimmed, &[_][]const u8{
+            "return ",
+            "const ",
+            "let ",
+            "var ",
+            "export ",
+        });
+}
+
+fn startsWithAny(text: []const u8, prefixes: []const []const u8) bool {
+    for (prefixes) |prefix| {
+        if (std.mem.startsWith(u8, text, prefix)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Tests
@@ -250,7 +355,10 @@ test "brace nesting: clean function passes" {
     const lines = try types.splitLines(testing.allocator, src);
     defer testing.allocator.free(lines);
 
-    const v = try analyzeBraceNesting(testing.allocator, lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceNesting(testing.allocator, lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
 }
@@ -272,7 +380,10 @@ test "brace nesting: depth 4 triggers violation" {
     const lines = try types.splitLines(testing.allocator, src);
     defer testing.allocator.free(lines);
 
-    const v = try analyzeBraceNesting(testing.allocator, lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceNesting(testing.allocator, lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
     try testing.expectEqual(Rule.nesting_depth, v[0].rule);
@@ -288,7 +399,83 @@ test "python nesting: irregular indentation tracks logical depth" {
     const lines = try types.splitLines(testing.allocator, src);
     defer testing.allocator.free(lines);
 
-    const v = try analyzePythonNesting(testing.allocator, lines, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzePythonNesting(testing.allocator, lines, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "brace nesting: object literals do not count as control-flow nesting" {
+    const src =
+        \\export function build(): Config {
+        \\    return {
+        \\        inner: {
+        \\            deep: {
+        \\                value: 42,
+        \\            },
+        \\        },
+        \\    };
+        \\}
+    ;
+    const lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceNesting(testing.allocator, lines, .typescript, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "brace nesting: TypeScript arrow functions are tracked independently" {
+    const src =
+        \\export const build = () => {
+        \\    if (ready) {
+        \\        return list.filter((value) => {
+        \\            if (value.ok) {
+        \\                return true;
+        \\            }
+        \\            return false;
+        \\        });
+        \\    }
+        \\    return [];
+        \\};
+    ;
+    const lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceNesting(testing.allocator, lines, .typescript, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "brace nesting: Zig test blocks are analyzed as functions" {
+    const src =
+        \\test "deep" {
+        \\    if (a) {
+        \\        if (b) {
+        \\            if (c) {
+        \\                if (d) {
+        \\                    return;
+        \\                }
+        \\            }
+        \\        }
+        \\    }
+        \\}
+    ;
+    const lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeBraceNesting(testing.allocator, lines, .zig_lang, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expect(v.len > 0);
 }

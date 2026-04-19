@@ -18,10 +18,9 @@ pub const Override = config_schema.Override;
 pub const Config = config_schema.Config;
 
 pub const LoadedConfig = config_loader.LoadedConfig;
-pub const default_cache_key = config_loader.default_cache_key;
+pub const default_config_name = config_loader.default_config_name;
 pub const loadForTarget = config_loader.loadForTarget;
 pub const resolveCacheKey = config_loader.resolveCacheKey;
-pub const isDefaultCacheKey = config_loader.isDefaultCacheKey;
 
 test {
     _ = @import("config_schema.zig");

@@ -1,5 +1,6 @@
 const std = @import("std");
 const guardian_config = @import("../config.zig");
+const test_config = @import("../test_config.zig");
 const types = @import("../types.zig");
 
 const Violation = types.Violation;
@@ -183,7 +184,13 @@ fn analyzeTypescriptTypes(
         const line_no = @as(u32, @intCast(line_idx)) + 1;
 
         if (cfg.typescript.ban_any) {
-            if (std.mem.indexOf(u8, line, ": any")) |col| {
+            var search_pos: usize = 0;
+            while (std.mem.indexOfPos(u8, line, search_pos, ": any")) |col| {
+                const any_col = col + ": ".len;
+                if (!hasTokenBoundary(line, any_col, "any".len)) {
+                    search_pos = any_col + "any".len;
+                    continue;
+                }
                 try appendStaticViolation(
                     violations,
                     line_no,
@@ -192,8 +199,15 @@ fn analyzeTypescriptTypes(
                     .@"error",
                     "explicit 'any' type — use a concrete type",
                 );
+                search_pos = any_col + "any".len;
             }
-            if (std.mem.indexOf(u8, line, ":any")) |col| {
+            search_pos = 0;
+            while (std.mem.indexOfPos(u8, line, search_pos, ":any")) |col| {
+                const any_col = col + ":".len;
+                if (!hasTokenBoundary(line, any_col, "any".len)) {
+                    search_pos = any_col + "any".len;
+                    continue;
+                }
                 try appendStaticViolation(
                     violations,
                     line_no,
@@ -202,6 +216,7 @@ fn analyzeTypescriptTypes(
                     .@"error",
                     "explicit 'any' type — use a concrete type",
                 );
+                search_pos = any_col + "any".len;
             }
             if (std.mem.indexOf(u8, line, "<any>")) |col| {
                 try appendStaticViolation(
@@ -215,7 +230,13 @@ fn analyzeTypescriptTypes(
             }
         }
         if (cfg.typescript.ban_as_any) {
-            if (std.mem.indexOf(u8, line, " as any")) |col| {
+            var search_pos: usize = 0;
+            while (std.mem.indexOfPos(u8, line, search_pos, " as any")) |col| {
+                const any_col = col + " as ".len;
+                if (!hasTokenBoundary(line, any_col, "any".len)) {
+                    search_pos = any_col + "any".len;
+                    continue;
+                }
                 try appendStaticViolation(
                     violations,
                     line_no,
@@ -224,6 +245,7 @@ fn analyzeTypescriptTypes(
                     .@"error",
                     "'as any' cast — use proper type narrowing",
                 );
+                search_pos = any_col + "any".len;
             }
         }
 
@@ -286,14 +308,17 @@ fn analyzePythonTypes(
 
         if (cfg.python.warn_import_any) {
             if (std.mem.indexOf(u8, trimmed, "from typing import Any")) |col| {
-                try appendStaticViolation(
-                    violations,
-                    line_no,
-                    @intCast(col),
-                    .banned_type,
-                    .warn,
-                    "importing Any — prefer concrete types",
-                );
+                const any_col = col + "from typing import ".len;
+                if (hasTokenBoundary(trimmed, any_col, "Any".len)) {
+                    try appendStaticViolation(
+                        violations,
+                        line_no,
+                        @intCast(col),
+                        .banned_type,
+                        .warn,
+                        "importing Any — prefer concrete types",
+                    );
+                }
             }
         }
 
@@ -405,6 +430,7 @@ fn checkPythonFunctionAnnotations(
 
     var collecting = false;
     var signature_start_line: u32 = 0;
+    var depth = PythonSignatureDepth{};
 
     for (masked_lines, 0..) |line, line_idx| {
         const trimmed = std.mem.trimLeft(u8, line, " \t");
@@ -415,9 +441,10 @@ fn checkPythonFunctionAnnotations(
             collecting = true;
             signature_start_line = @as(u32, @intCast(line_idx)) + 1;
             try signature.resize(0);
+            depth = .{};
             try signature.appendSlice(trimmed);
 
-            if (std.mem.indexOfScalar(u8, trimmed, ':') != null) {
+            if (pythonSignatureLineComplete(trimmed, &depth)) {
                 try finalizePythonSignature(signature.items, signature_start_line, violations, cfg);
                 collecting = false;
             }
@@ -430,7 +457,7 @@ fn checkPythonFunctionAnnotations(
 
         try signature.append(' ');
         try signature.appendSlice(trimmed);
-        if (std.mem.indexOfScalar(u8, trimmed, ':') != null) {
+        if (pythonSignatureLineComplete(trimmed, &depth)) {
             try finalizePythonSignature(signature.items, signature_start_line, violations, cfg);
             collecting = false;
         }
@@ -474,7 +501,8 @@ fn appendPythonAnnotationViolations(
     cfg: guardian_config.Config,
 ) !void {
     if (cfg.python.ban_any_annotation) {
-        if (std.mem.indexOf(u8, annotation, "Any")) |col| {
+        var search_pos: usize = 0;
+        while (std.mem.indexOfPos(u8, annotation, search_pos, "Any")) |col| {
             if (isPythonAnyBoundary(annotation, col)) {
                 try appendStaticViolation(
                     violations,
@@ -485,6 +513,7 @@ fn appendPythonAnnotationViolations(
                     "Any type annotation — use a concrete type or Protocol",
                 );
             }
+            search_pos = col + "Any".len;
         }
     }
 
@@ -516,16 +545,7 @@ fn appendPythonAnnotationViolations(
 }
 
 fn isPythonAnyBoundary(annotation: []const u8, col: usize) bool {
-    if (col == 0) {
-        return true;
-    }
-
-    const prev = annotation[col - 1];
-    return prev == ':' or
-        prev == ' ' or
-        prev == '-' or
-        prev == ',' or
-        prev == '(';
+    return hasTokenBoundary(annotation, col, "Any".len);
 }
 
 fn findBarePythonContainer(annotation: []const u8, container: []const u8) ?usize {
@@ -588,28 +608,140 @@ fn checkGoTypeAssertions(
         }
 
         if (cfg.go.ban_unchecked_type_assertions) {
-            if (std.mem.indexOf(u8, line, ".(")) |col| {
+            var search_pos: usize = 0;
+            while (std.mem.indexOfPos(u8, line, search_pos, ".(")) |col| {
+                search_pos = col + 2;
                 if (std.mem.startsWith(u8, trimmed, "switch ") or std.mem.startsWith(u8, trimmed, "case ")) {
+                    break;
+                }
+
+                const close = findMatchingParen(line[col + 1 ..]) orelse continue;
+                if (std.mem.eql(u8, std.mem.trim(u8, line[col + 2 .. col + 1 + close], " \t"), "type")) {
+                    continue;
+                }
+                if (hasLocalGoCommaOk(line, col)) {
                     continue;
                 }
 
-                const has_comma_ok = std.mem.indexOf(u8, line, ", ok") != null or
-                    std.mem.indexOf(u8, line, ",ok") != null or
-                    std.mem.indexOf(u8, line, ", _") != null;
-
-                if (!has_comma_ok) {
-                    try appendStaticViolation(
-                        violations,
-                        line_no,
-                        @intCast(col),
-                        .banned_type,
-                        .@"error",
-                        "type assertion without comma-ok pattern — use val, ok := x.(T)",
-                    );
-                }
+                try appendStaticViolation(
+                    violations,
+                    line_no,
+                    @intCast(col),
+                    .banned_type,
+                    .@"error",
+                    "type assertion without comma-ok pattern — use val, ok := x.(T)",
+                );
             }
         }
     }
+}
+
+const PythonSignatureDepth = struct {
+    paren: i32 = 0,
+    bracket: i32 = 0,
+    brace: i32 = 0,
+};
+
+fn pythonSignatureLineComplete(line: []const u8, depth: *PythonSignatureDepth) bool {
+    for (line) |ch| {
+        if (ch == ':' and atTopLevelDepth(depth.*)) {
+            return true;
+        }
+
+        switch (ch) {
+            '(' => depth.paren += 1,
+            ')' => decrementIfPositive(&depth.paren),
+            '[' => depth.bracket += 1,
+            ']' => decrementIfPositive(&depth.bracket),
+            '{' => depth.brace += 1,
+            '}' => decrementIfPositive(&depth.brace),
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn decrementIfPositive(value: *i32) void {
+    if (value.* > 0) {
+        value.* -= 1;
+    }
+}
+
+fn atTopLevelDepth(depth: PythonSignatureDepth) bool {
+    return depth.paren == 0 and depth.bracket == 0 and depth.brace == 0;
+}
+
+fn hasTokenBoundary(text: []const u8, start: usize, len: usize) bool {
+    const before_ok = start == 0 or !isIdentifierContinuation(text[start - 1]);
+    const after = start + len;
+    const after_ok = after >= text.len or !isIdentifierContinuation(text[after]);
+    return before_ok and after_ok;
+}
+
+fn isIdentifierContinuation(ch: u8) bool {
+    return std.ascii.isAlphabetic(ch) or std.ascii.isDigit(ch) or ch == '_';
+}
+
+fn hasLocalGoCommaOk(line: []const u8, assertion_col: usize) bool {
+    const statement_start = lastStatementBoundary(line, assertion_col);
+    const prefix = line[statement_start..assertion_col];
+
+    const assign_col = lastAssignmentOperator(prefix) orelse return false;
+    const lhs = std.mem.trim(u8, prefix[0..assign_col], " \t");
+    if (std.mem.indexOfScalar(u8, lhs, ',')) |comma| {
+        const trailing = std.mem.trim(u8, lhs[comma + 1 ..], " \t");
+        const name = lastIdentifier(trailing);
+        return std.mem.eql(u8, name, "ok") or std.mem.eql(u8, name, "_");
+    }
+    return false;
+}
+
+fn lastStatementBoundary(line: []const u8, end: usize) usize {
+    var idx = end;
+    while (idx > 0) {
+        idx -= 1;
+        if (line[idx] == ';') {
+            return idx + 1;
+        }
+    }
+    return 0;
+}
+
+fn lastAssignmentOperator(prefix: []const u8) ?usize {
+    if (std.mem.lastIndexOf(u8, prefix, ":=")) |pos| {
+        return pos;
+    }
+
+    var idx = prefix.len;
+    while (idx > 0) {
+        idx -= 1;
+        if (prefix[idx] != '=') {
+            continue;
+        }
+        if (isNonAssignmentEquals(prefix, idx)) {
+            continue;
+        }
+        return idx;
+    }
+    return null;
+}
+
+fn isNonAssignmentEquals(prefix: []const u8, idx: usize) bool {
+    if (idx > 0) {
+        switch (prefix[idx - 1]) {
+            '=', '!', '<', '>' => return true,
+            else => {},
+        }
+    }
+    return idx + 1 < prefix.len and prefix[idx + 1] == '=';
+}
+
+fn lastIdentifier(text: []const u8) []const u8 {
+    var idx = text.len;
+    while (idx > 0 and !isIdentifierContinuation(text[idx - 1])) : (idx -= 1) {}
+    const end = idx;
+    while (idx > 0 and isIdentifierContinuation(text[idx - 1])) : (idx -= 1) {}
+    return text[idx..end];
 }
 
 fn appendStaticViolation(
@@ -803,7 +935,10 @@ test "types: detects interface{} in Go function signatures" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
 }
@@ -823,7 +958,10 @@ test "types: ignores interface{} in Go strings and comments" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
 }
@@ -842,9 +980,82 @@ test "types: detects any in TypeScript" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .typescript, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .typescript, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
+}
+
+test "types: TypeScript any boundaries ignore longer identifiers" {
+    const src =
+        \\function handle(data: anything): void {
+        \\    const value = input as anyway;
+        \\    return;
+        \\}
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .typescript);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .typescript, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "types: Python Any boundary ignores AnyStr" {
+    const src =
+        \\from typing import AnyStr
+        \\
+        \\def read_name(value: AnyStr) -> AnyStr:
+        \\    return value
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .python);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .python, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "types: Go checks each type assertion independently" {
+    const src =
+        \\func convert(first any, second any) {
+        \\    _, ok := first.(int); _ = second.(string)
+        \\    _ = ok
+        \\}
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .go);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+
+    try testing.expectEqual(@as(usize, 1), countRule(v, .banned_type));
 }
 
 test "types: detects Go generics when banned by config" {
@@ -861,7 +1072,10 @@ test "types: detects Go generics when banned by config" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
     try testing.expectEqual(Rule.generic_usage, v[0].rule);
@@ -881,7 +1095,10 @@ test "types: ignores internal Go generics with public-only scope" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .go, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
 }
@@ -900,7 +1117,10 @@ test "types: ignores internal Zig anytype with public-only scope" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .zig_lang, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .zig_lang, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
 }
@@ -919,7 +1139,20 @@ test "types: warns on public Zig anytype with public-only scope" {
     const masked_lines = try types.splitLines(testing.allocator, masked_source);
     defer testing.allocator.free(masked_lines);
 
-    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .zig_lang, .{});
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .zig_lang, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
+}
+
+fn countRule(violations: []const Violation, rule: Rule) usize {
+    var count: usize = 0;
+    for (violations) |violation| {
+        if (violation.rule == rule) {
+            count += 1;
+        }
+    }
+    return count;
 }

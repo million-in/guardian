@@ -55,7 +55,7 @@ fn writeUsage(writer: anytype) !void {
         \\  gd serve
         \\
         \\Config:
-        \\  Auto-loads `.guardian.json` or `guardian.json` from the target path upward.
+        \\  Auto-loads `guardian.config.json` from the target path upward.
         \\  Use `--config path` to force a specific config file.
         \\  `--json` keeps human output on a terminal, but emits JSON when piped.
         \\  `--raw-json` always emits JSON.
