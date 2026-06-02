@@ -12,6 +12,39 @@ const formatting = @import("analyzers/formatting.zig");
 const Language = types.Language;
 const Violation = types.Violation;
 
+pub const SeverityFilter = enum {
+    all,
+    errors_only,
+    warnings_only,
+    clear_errors,
+
+    pub fn includes(self: SeverityFilter, severity: types.Severity) bool {
+        return switch (self) {
+            .all => true,
+            .errors_only => severity == .@"error",
+            .warnings_only, .clear_errors => severity == .warn,
+        };
+    }
+
+    pub fn fromString(value: []const u8) ?SeverityFilter {
+        if (std.mem.eql(u8, value, "all")) return .all;
+        if (std.mem.eql(u8, value, "errors_only")) return .errors_only;
+        if (std.mem.eql(u8, value, "warnings_only")) return .warnings_only;
+        if (std.mem.eql(u8, value, "warns_only")) return .warnings_only;
+        if (std.mem.eql(u8, value, "clear_errors")) return .clear_errors;
+        return null;
+    }
+};
+
+pub const JsonOptions = struct {
+    severity_filter: SeverityFilter = .all,
+};
+
+pub const SeverityCounts = struct {
+    errors: u32 = 0,
+    warns: u32 = 0,
+};
+
 pub const AnalysisResult = struct {
     violations: []Violation,
     file_path: []const u8,
@@ -112,21 +145,36 @@ pub fn freeResult(allocator: std.mem.Allocator, result: AnalysisResult) void {
 
 /// Serialize analysis result to JSON.
 pub fn resultToJson(allocator: std.mem.Allocator, result: AnalysisResult) ![]u8 {
+    return resultToJsonWithOptions(allocator, result, .{});
+}
+
+pub fn resultToJsonWithOptions(
+    allocator: std.mem.Allocator,
+    result: AnalysisResult,
+    options: JsonOptions,
+) ![]u8 {
     var buf = std.array_list.Managed(u8).init(allocator);
     const writer = buf.writer();
+    const counts = countIncludedViolations(result, options.severity_filter);
 
     try writer.writeAll("{\"file_path\":\"");
     try writeJsonEscaped(writer, result.file_path);
     try writer.writeAll("\",\"language\":\"");
     try writeJsonEscaped(writer, @tagName(result.language));
     try std.fmt.format(writer, "\",\"line_count\":{d},", .{result.line_count});
-    try std.fmt.format(writer, "\"error_count\":{d},", .{result.error_count});
-    try std.fmt.format(writer, "\"warn_count\":{d},", .{result.warn_count});
-    try std.fmt.format(writer, "\"pass\":{},", .{result.error_count == 0});
+    try std.fmt.format(writer, "\"error_count\":{d},", .{counts.errors});
+    try std.fmt.format(writer, "\"warn_count\":{d},", .{counts.warns});
+    try std.fmt.format(writer, "\"pass\":{},", .{counts.errors == 0});
     try writer.writeAll("\"violations\":[");
 
+    var written: usize = 0;
     for (result.violations, 0..) |v, i| {
-        if (i > 0) try writer.writeAll(",");
+        _ = i;
+        if (!options.severity_filter.includes(v.severity)) {
+            continue;
+        }
+        if (written > 0) try writer.writeAll(",");
+        written += 1;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"line\":{d},", .{v.line});
         try std.fmt.format(writer, "\"column\":{d},", .{v.column});
@@ -143,6 +191,24 @@ pub fn resultToJson(allocator: std.mem.Allocator, result: AnalysisResult) ![]u8 
 
     try writer.writeAll("]}");
     return buf.toOwnedSlice();
+}
+
+pub fn countIncludedViolations(
+    result: AnalysisResult,
+    severity_filter: SeverityFilter,
+) SeverityCounts {
+    var counts = SeverityCounts{};
+    for (result.violations) |violation| {
+        if (!severity_filter.includes(violation.severity)) {
+            continue;
+        }
+        switch (violation.severity) {
+            .@"error" => counts.errors += 1,
+            .warn => counts.warns += 1,
+            .info => {},
+        }
+    }
+    return counts;
 }
 
 fn attachExcerpts(

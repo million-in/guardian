@@ -1,5 +1,6 @@
 const std = @import("std");
 const config_schema = @import("config_schema.zig");
+const yaml_config = @import("yaml_config.zig");
 
 pub const LoadedConfig = struct {
     arena: std.heap.ArenaAllocator,
@@ -11,7 +12,8 @@ pub const LoadedConfig = struct {
     }
 };
 
-pub const default_config_name = "guardian.config.json";
+pub const default_config_name = "guardian.config.yaml";
+pub const legacy_config_name = "guardian.config.json";
 
 pub fn loadForTarget(
     allocator: std.mem.Allocator,
@@ -29,7 +31,7 @@ pub fn loadForTarget(
 
     const path = config_path orelse return error.FileNotFound;
     const bytes = try readFileAllocAbsolute(arena_allocator, path, max_config_bytes);
-    var value = try std.json.parseFromSliceLeaky(config_schema.Config, arena_allocator, bytes, .{});
+    var value = try parseConfigBytes(arena_allocator, path, bytes);
     value.root_path = std.fs.path.dirname(path) orelse "";
 
     return .{
@@ -131,7 +133,21 @@ fn moveToParent(current: *[]const u8) bool {
 }
 
 fn findConfigInDir(allocator: std.mem.Allocator, dir_path: []const u8) !?[]const u8 {
-    const candidate = try std.fs.path.join(allocator, &.{ dir_path, default_config_name });
+    if (try findNamedConfigInDir(allocator, dir_path, default_config_name)) |config_path| {
+        return config_path;
+    }
+    if (try findNamedConfigInDir(allocator, dir_path, legacy_config_name)) |config_path| {
+        return config_path;
+    }
+    return null;
+}
+
+fn findNamedConfigInDir(
+    allocator: std.mem.Allocator,
+    dir_path: []const u8,
+    name: []const u8,
+) !?[]const u8 {
+    const candidate = try std.fs.path.join(allocator, &.{ dir_path, name });
     if (std.fs.accessAbsolute(candidate, .{})) |_| {
         return candidate;
     } else |err| switch (err) {
@@ -154,10 +170,31 @@ fn readFileAllocAbsolute(
     return file.readToEndAlloc(allocator, max_bytes);
 }
 
+fn parseConfigBytes(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    bytes: []const u8,
+) !config_schema.Config {
+    const payload = if (shouldParseJson(path, bytes))
+        bytes
+    else
+        try yaml_config.yamlToJson(allocator, bytes);
+
+    return std.json.parseFromSliceLeaky(config_schema.Config, allocator, payload, .{});
+}
+
+fn shouldParseJson(path: []const u8, bytes: []const u8) bool {
+    if (std.mem.eql(u8, std.fs.path.extension(path), ".json")) {
+        return true;
+    }
+    const trimmed = std.mem.trimLeft(u8, bytes, " \t\r\n");
+    return trimmed.len > 0 and trimmed[0] == '{';
+}
+
 const testing = std.testing;
 const test_config = @import("test_config.zig");
 
-test "config loader: loads repository guardian.config.json by default" {
+test "config loader: loads repository guardian.config.yaml by default" {
     var loaded = try loadForTarget(testing.allocator, null, null);
     defer loaded.deinit();
 
@@ -188,7 +225,7 @@ test "config loader: loads overrides from discovered file" {
     defer testing.allocator.free(config_json);
 
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
+        .sub_path = legacy_config_name,
         .data = config_json,
     });
     try tmp.dir.writeFile(.{
@@ -207,11 +244,11 @@ test "config loader: loads overrides from discovered file" {
     try testing.expect(!loaded.value.go.ban_generics);
     try testing.expectEqual(@as(usize, 2), loaded.value.scan.extensions.len);
     try testing.expect(loaded.source_path != null);
-    try testing.expect(std.mem.endsWith(u8, loaded.source_path.?, default_config_name));
+    try testing.expect(std.mem.endsWith(u8, loaded.source_path.?, legacy_config_name));
     try testing.expect(loaded.value.root_path.len > 0);
 }
 
-test "config loader: resolve cache key uses discovered guardian.config.json" {
+test "config loader: resolve cache key uses discovered guardian.config.yaml" {
     const key = try resolveCacheKey(testing.allocator, null, null);
     defer testing.allocator.free(key);
 
@@ -229,11 +266,11 @@ test "config loader: resolve cache key duplicates explicit absolute config path"
     defer testing.allocator.free(config_json);
 
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
+        .sub_path = legacy_config_name,
         .data = config_json,
     });
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, legacy_config_name);
     defer testing.allocator.free(absolute_config);
 
     const key = try resolveCacheKey(testing.allocator, null, absolute_config);
@@ -248,7 +285,7 @@ test "config loader: rejects unknown fields" {
     defer tmp.cleanup();
 
     try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
+        .sub_path = legacy_config_name,
         .data =
         \\{
         \\  "limits": {
@@ -309,7 +346,71 @@ test "config loader: rejects unknown fields" {
         ,
     });
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, legacy_config_name);
+    defer testing.allocator.free(absolute_config);
+
+    try testing.expectError(error.UnknownField, loadForTarget(testing.allocator, null, absolute_config));
+}
+
+test "config loader: rejects unknown fields from yaml" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = default_config_name,
+        .data =
+        \\limits:
+        \\  max_nesting: 3
+        \\  cyclomatic_complexity_warn: 6
+        \\  cyclomatic_complexity_error: 8
+        \\  max_imports: 15
+        \\  max_functions_per_file: 15
+        \\  max_function_lines: 50
+        \\  max_function_arguments: 3
+        \\  max_type_fields: 10
+        \\  max_hidden_touch_excess: 0
+        \\  max_lifecycle_flags: 2
+        \\  max_line_length: 120
+        \\  max_excerpt_lines: 12
+        \\  max_excerpt_chars: 1600
+        \\  max_nestign: 4
+        \\scan:
+        \\  extensions: [".go"]
+        \\  ignored_dirs: [".git"]
+        \\go:
+        \\  ban_interface_empty: true
+        \\  ban_map_string_interface_empty: true
+        \\  warn_type_switch: true
+        \\  ban_unchecked_type_assertions: true
+        \\  ban_generics: true
+        \\  surface_scope: "public_only"
+        \\  generic_scope: "public_only"
+        \\  extra_banned_patterns: []
+        \\typescript:
+        \\  ban_any: true
+        \\  ban_as_any: true
+        \\  ban_ts_ignore: true
+        \\  warn_ts_expect_error: true
+        \\  extra_banned_patterns: []
+        \\python:
+        \\  ban_type_ignore: true
+        \\  warn_import_any: true
+        \\  ban_any_annotation: true
+        \\  warn_bare_dict: true
+        \\  warn_bare_list: true
+        \\  warn_missing_return_annotation: true
+        \\  extra_banned_patterns: []
+        \\zig:
+        \\  warn_ptr_cast: true
+        \\  warn_int_cast: true
+        \\  warn_anytype: true
+        \\  cast_scope: "public_only"
+        \\  anytype_scope: "public_only"
+        \\  extra_banned_patterns: []
+        ,
+    });
+
+    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, default_config_name);
     defer testing.allocator.free(absolute_config);
 
     try testing.expectError(error.UnknownField, loadForTarget(testing.allocator, null, absolute_config));

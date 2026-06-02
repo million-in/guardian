@@ -22,19 +22,19 @@ pub fn analyzeTypes(
         .go => {
             try analyzeGoTypes(masked_lines, &violations, cfg);
             try checkGoTypeAssertions(masked_lines, &violations, cfg);
-            try appendConfiguredPatterns(masked_lines, cfg.go.extra_banned_patterns, &violations);
+            try appendConfiguredPatterns(allocator, masked_lines, cfg.go.extra_banned_patterns, &violations);
         },
         .typescript => {
             try analyzeTypescriptTypes(raw_lines, masked_lines, &violations, cfg);
-            try appendConfiguredPatterns(masked_lines, cfg.typescript.extra_banned_patterns, &violations);
+            try appendConfiguredPatterns(allocator, masked_lines, cfg.typescript.extra_banned_patterns, &violations);
         },
         .python => {
             try analyzePythonTypes(allocator, raw_lines, masked_lines, &violations, cfg);
-            try appendConfiguredPatterns(masked_lines, cfg.python.extra_banned_patterns, &violations);
+            try appendConfiguredPatterns(allocator, masked_lines, cfg.python.extra_banned_patterns, &violations);
         },
         .zig_lang => {
             try analyzeZigTypes(masked_lines, &violations, cfg);
-            try appendConfiguredPatterns(masked_lines, cfg.zig.extra_banned_patterns, &violations);
+            try appendConfiguredPatterns(allocator, masked_lines, cfg.zig.extra_banned_patterns, &violations);
         },
     }
 
@@ -763,6 +763,7 @@ fn appendStaticViolation(
 }
 
 fn appendConfiguredPatterns(
+    allocator: std.mem.Allocator,
     masked_lines: []const []const u8,
     patterns: []const guardian_config.Pattern,
     violations: *ViolationList,
@@ -770,14 +771,17 @@ fn appendConfiguredPatterns(
     for (patterns) |pattern| {
         for (masked_lines, 0..) |line, line_idx| {
             if (std.mem.indexOf(u8, line, pattern.pattern)) |col| {
-                try appendStaticViolation(
-                    violations,
-                    @as(u32, @intCast(line_idx)) + 1,
-                    @intCast(col),
-                    .banned_type,
-                    pattern.severity,
-                    pattern.message,
-                );
+                const owned_message = try allocator.dupe(u8, pattern.message);
+                errdefer allocator.free(owned_message);
+                try violations.append(.{
+                    .line = @as(u32, @intCast(line_idx)) + 1,
+                    .column = @intCast(col),
+                    .end_line = @as(u32, @intCast(line_idx)) + 1,
+                    .rule = .banned_type,
+                    .severity = pattern.severity,
+                    .message = owned_message,
+                    .message_owned = true,
+                });
             }
         }
     }
@@ -1009,6 +1013,38 @@ test "types: TypeScript any boundaries ignore longer identifiers" {
     const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .typescript, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "types: configured pattern messages are owned" {
+    const src =
+        \\function handle(data: string): void {
+        \\    console.log(data);
+        \\}
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .typescript);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .typescript, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+
+    try testing.expect(v.len > 0);
+    try testing.expect(v[0].message_owned);
+    try testing.expectEqualStrings(
+        loaded.value.typescript.extra_banned_patterns[0].message,
+        v[0].message,
+    );
+    try testing.expect(
+        @intFromPtr(v[0].message.ptr) !=
+            @intFromPtr(loaded.value.typescript.extra_banned_patterns[0].message.ptr),
+    );
 }
 
 test "types: Python Any boundary ignores AnyStr" {

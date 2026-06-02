@@ -23,12 +23,14 @@ Use the Nix flake when you want the same toolchain locally and in CI:
 nix develop -c zig build ci
 ```
 
-This produces two binaries in `zig-out/bin/`:
+This produces CLI/MCP binaries plus static and dynamic libraries:
 
-| Binary | Purpose |
+| Artifact | Purpose |
 |---|---|
-| `gd` | CLI for single-file, batch, and folder analysis |
-| `guardian-mcp` | MCP server communicating over stdin/stdout via JSON-RPC with Content-Length framing |
+| `zig-out/bin/gd` | CLI for single-file, batch, and folder analysis |
+| `zig-out/bin/guardian-mcp` | MCP server communicating over stdin/stdout via JSON-RPC with Content-Length framing |
+| `zig-out/lib/libguardian.*` | C ABI library for C, C++, and Go/cgo callers |
+| `zig-out/include/guardian.h` | Header for the C ABI |
 
 ## Install Options
 
@@ -44,6 +46,7 @@ This produces two binaries in `zig-out/bin/`:
 Tagged releases package a portable archive containing:
 
 - `bin/gd` and `bin/guardian-mcp`
+- `lib/libguardian.*` and `include/guardian.h`
 - `.mcp.json` for project-local MCP installs
 - `.claude/settings.json` for Claude Code
 - `.claude-plugin/` for Claude plugin installs
@@ -96,7 +99,27 @@ When invoked with no arguments (or `gd serve`), Guardian runs as an MCP server o
 | `analyze_batch` | Analyze multiple files in one request | `files` (array of `{file_path, source}`) |
 | `analyze_folder` | Recursively analyze a directory on disk | `path` |
 
-All tools accept an optional `config_path` parameter to override config discovery.
+All tools accept optional `config_path` and `severity_filter` parameters. `severity_filter` accepts `all`, `errors_only`, `warnings_only`, or `clear_errors`. Tool-call responses return JSON text in the MCP content payload.
+
+## Library API
+
+The Zig root module exposes JSON-returning helpers:
+
+- `analyzeSourceJson`
+- `analyzeFileJson`
+- `analyzeBatchJson`
+- `analyzeFolderJson`
+
+The installed C ABI uses owned JSON strings:
+
+```c
+char *guardian_analyze_file_json(const char *file_path, const char *config_path, int severity_filter);
+char *guardian_analyze_folder_json(const char *folder_path, const char *config_path, int severity_filter);
+char *guardian_analyze_source_json(const char *file_path, const char *source, const char *config_path, int severity_filter);
+void guardian_free_string(char *value);
+```
+
+Use `GUARDIAN_SEVERITY_ALL`, `GUARDIAN_SEVERITY_ERRORS_ONLY`, `GUARDIAN_SEVERITY_WARNINGS_ONLY`, or `GUARDIAN_SEVERITY_CLEAR_ERRORS` from `guardian.h`.
 
 ### Integration with Claude Code
 
@@ -199,56 +222,55 @@ Scope controls (`public_only` or `all`) determine whether rules apply to interna
 
 ## Configuration
 
-Guardian auto-discovers `guardian.config.json` by walking up from the target file's directory. If the target tree does not provide one, Guardian falls back to the packaged `guardian.config.json`. Use `--config path` to specify an explicit config file.
+Guardian auto-discovers `guardian.config.yaml` by walking up from the target file's directory. If the target tree does not provide one, Guardian falls back to the packaged `guardian.config.yaml`. Legacy `guardian.config.json` files are still readable during migration. Use `--config path` to specify an explicit config file.
 
-See `guardian.config.json` for the shipped default config. Key sections:
+See `guardian.config.yaml` for the shipped default config. Key sections:
 
-```json
-{
-  "limits": {
-    "max_nesting": 3,
-    "cyclomatic_complexity_warn": 6,
-    "cyclomatic_complexity_error": 8,
-    "max_imports": 15,
-    "max_functions_per_file": 16,
-    "max_function_lines": 80,
-    "max_function_arguments": 3,
-    "max_type_fields": 12,
-    "max_hidden_touch_excess": 2,
-    "max_lifecycle_flags": 2,
-    "max_line_length": 120,
-    "max_excerpt_lines": 12,
-    "max_excerpt_chars": 1600
-  },
-  "scan": {
-    "extensions": [".go", ".ts", ".tsx", ".py", ".zig"],
-    "ignored_dirs": [".git", "node_modules", "vendor", "dist", "build"]
-  },
-  "go": { "ban_generics": true, "surface_scope": "public_only" },
-  "typescript": { "extra_banned_patterns": [...] },
-  "python": { "warn_missing_return_annotation": true },
-  "zig": { "warn_anytype": true, "anytype_scope": "public_only" }
-}
+```yaml
+limits:
+  max_nesting: 3
+  cyclomatic_complexity_warn: 6
+  cyclomatic_complexity_error: 8
+  max_imports: 15
+  max_functions_per_file: 16
+  max_function_lines: 80
+  max_function_arguments: 3
+  max_type_fields: 12
+  max_hidden_touch_excess: 2
+  max_lifecycle_flags: 2
+  max_line_length: 120
+  max_excerpt_lines: 12
+  max_excerpt_chars: 1600
+scan:
+  extensions: [".go", ".ts", ".tsx", ".py", ".zig"]
+  ignored_dirs: [".git", "node_modules", "vendor", "dist", "build"]
+go:
+  ban_generics: true
+  surface_scope: "public_only"
+typescript:
+  extra_banned_patterns: []
+python:
+  warn_missing_return_annotation: true
+zig:
+  warn_anytype: true
+  anytype_scope: "public_only"
 ```
 
 ### Overrides
 
 Per-path overrides let you relax or tighten rules for specific directories, file roles, or extensions:
 
-```json
-{
-  "overrides": [
-    {
-      "path_prefixes": ["src/analyzers/"],
-      "limits": { "max_function_lines": 120, "max_line_length": 160 }
-    },
-    {
-      "roles": ["test", "fixture", "sample"],
-      "limits": { "max_function_lines": 90 },
-      "go": { "ban_generics": false }
-    }
-  ]
-}
+```yaml
+overrides:
+  - path_prefixes: ["src/analyzers/"]
+    limits:
+      max_function_lines: 120
+      max_line_length: 160
+  - roles: ["test", "fixture", "sample"]
+    limits:
+      max_function_lines: 90
+    go:
+      ban_generics: false
 ```
 
 **Override matchers** (all conditions must match when present):
@@ -265,7 +287,7 @@ Overrides are applied in order; later overrides take precedence for the same fie
 
 ### Monorepo Support
 
-In batch and folder modes, Guardian resolves config independently per file by walking up from each file's directory. This means different subdirectories can have their own `guardian.config.json` with distinct rules. Config resolution results are cached per discovered config path to avoid redundant I/O.
+In batch and folder modes, Guardian resolves config independently per file by walking up from each file's directory. This means different subdirectories can have their own `guardian.config.yaml` with distinct rules. Config resolution results are cached per discovered config path to avoid redundant I/O.
 
 ## Output Formats
 

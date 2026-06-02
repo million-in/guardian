@@ -41,11 +41,13 @@ archive_name="code-guardian-$platform.tar.gz"
 mkdir -p dist
 rm -rf "$archive_root" "$archive_name"
 
-mkdir -p "$archive_root/bin"
+mkdir -p "$archive_root/bin" "$archive_root/include" "$archive_root/lib"
 
 cp zig-out/bin/gd "$archive_root/bin/"
 cp zig-out/bin/guardian-mcp "$archive_root/bin/"
-cp README.md guardian.config.json AGENTS.md LICENSE plugin.mcp.json "$archive_root/"
+cp zig-out/lib/libguardian.* "$archive_root/lib/"
+cp include/guardian.h "$archive_root/include/"
+cp README.md guardian.config.yaml AGENTS.md LICENSE plugin.mcp.json "$archive_root/"
 
 copy_tree skills "$archive_root/skills"
 copy_tree .codex-plugin "$archive_root/.codex-plugin"

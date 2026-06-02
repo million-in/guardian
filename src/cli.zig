@@ -55,7 +55,7 @@ fn writeUsage(writer: anytype) !void {
         \\  gd serve
         \\
         \\Config:
-        \\  Auto-loads `guardian.config.json` from the target path upward.
+        \\  Auto-loads `guardian.config.yaml` from the target path upward.
         \\  Use `--config path` to force a specific config file.
         \\  `--json` keeps human output on a terminal, but emits JSON when piped.
         \\  `--raw-json` always emits JSON.
@@ -72,6 +72,7 @@ pub fn writeCliError(err: anyerror) !void {
             "error: unsupported file extension for analyze/batch input\n",
         ),
         error.FileNotFound => try stderr.writeAll("error: file or config path not found\n"),
+        error.InvalidInput => try stderr.writeAll("error: invalid input path\n"),
         error.NotDirectory => try stderr.writeAll("error: folder command expects a directory path\n"),
         error.NoSupportedSourceFiles => try stderr.writeAll("error: folder does not contain supported source files\n"),
         else => try stderr.print("error: {}\n", .{err}),

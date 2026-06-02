@@ -25,5 +25,6 @@ test {
     _ = @import("app.zig");
     _ = @import("cli.zig");
     _ = @import("config.zig");
+    _ = @import("root.zig");
     _ = @import("server.zig");
 }

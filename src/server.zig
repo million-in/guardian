@@ -1,7 +1,7 @@
 const std = @import("std");
 const analyzer = @import("analyzer.zig");
-const app = @import("app.zig");
 const guardian_config = @import("config.zig");
+const guardian = @import("root.zig");
 const jsonrpc = @import("jsonrpc.zig");
 const protocol_parse = @import("protocol_parse.zig");
 const test_config = @import("test_config.zig");
@@ -32,7 +32,13 @@ pub fn run(allocator: std.mem.Allocator) !void {
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
     while (true) {
-        const message = try readMessagePayload(allocator, stdin);
+        const message = readMessagePayload(allocator, stdin) catch |err| {
+            try stderr.print("code-guardian-mcp: invalid message: {}\n", .{err});
+            const error_response = try jsonrpc.formatError(allocator, null, -32700, "invalid message");
+            defer allocator.free(error_response);
+            try writeMessage(stdout, error_response, .raw_line);
+            break;
+        };
         if (message == null) {
             break;
         }
@@ -276,24 +282,22 @@ fn handleAnalyze(
         return try jsonrpc.formatError(allocator, id, -32602, "missing source");
     };
     const config_path = protocol_parse.getOptionalStringField(arguments_object, "config_path");
+    const options = parseJsonOptions(arguments_object) orelse {
+        return try jsonrpc.formatError(allocator, id, -32602, "invalid severity_filter");
+    };
 
-    var loaded_cfg = try guardian_config.loadForTarget(allocator, file_path, config_path);
-    defer loaded_cfg.deinit();
-
-    const result = try app.analyzeInput(allocator, file_path, source, loaded_cfg.value);
-    defer analyzer.freeResult(allocator, result);
+    const json = guardian.analyzeSourceJson(
+        allocator,
+        file_path,
+        source,
+        config_path,
+        options,
+    ) catch |err| return handleAnalyzeError(allocator, id, err);
+    defer allocator.free(json);
 
     return switch (mode) {
-        .direct => {
-            const json = try analyzer.resultToJson(allocator, result);
-            defer allocator.free(json);
-            return jsonrpc.formatResponse(allocator, id, json);
-        },
-        .tool => {
-            const text = try app.resultToToolText(allocator, result);
-            defer allocator.free(text);
-            return jsonrpc.formatToolResult(allocator, id, text, false);
-        },
+        .direct => jsonrpc.formatResponse(allocator, id, json),
+        .tool => jsonrpc.formatToolResult(allocator, id, json, false),
     };
 }
 
@@ -318,20 +322,21 @@ fn handleAnalyzeBatch(
     defer allocator.free(inputs);
 
     const config_path = protocol_parse.getOptionalStringField(arguments_object, "config_path");
-    var batch = try app.analyzeBatchInputsResolved(allocator, inputs, config_path);
-    defer batch.deinit(allocator);
+    const options = parseJsonOptions(arguments_object) orelse {
+        return try jsonrpc.formatError(allocator, id, -32602, "invalid severity_filter");
+    };
+
+    const json = guardian.analyzeBatchJson(
+        allocator,
+        inputs,
+        config_path,
+        options,
+    ) catch |err| return handleAnalyzeError(allocator, id, err);
+    defer allocator.free(json);
 
     return switch (mode) {
-        .direct => {
-            const json = try app.batchToJson(allocator, batch);
-            defer allocator.free(json);
-            return jsonrpc.formatResponse(allocator, id, json);
-        },
-        .tool => {
-            const text = try app.batchToToolText(allocator, batch);
-            defer allocator.free(text);
-            return jsonrpc.formatToolResult(allocator, id, text, false);
-        },
+        .direct => jsonrpc.formatResponse(allocator, id, json),
+        .tool => jsonrpc.formatToolResult(allocator, id, json, false),
     };
 }
 
@@ -345,26 +350,53 @@ fn handleAnalyzeFolder(
         return try jsonrpc.formatError(allocator, id, -32602, "missing path");
     };
     const config_path = protocol_parse.getOptionalStringField(arguments_object, "config_path");
+    const options = parseJsonOptions(arguments_object) orelse {
+        return try jsonrpc.formatError(allocator, id, -32602, "invalid severity_filter");
+    };
     validateAnalyzeFolderPath(allocator, folder_path, config_path) catch |err| {
         return handleAnalyzeFolderError(allocator, id, err);
     };
 
-    var batch = app.analyzeFolderResolved(allocator, folder_path, config_path) catch |err| {
+    const json = guardian.analyzeFolderJson(allocator, folder_path, config_path, options) catch |err| {
         return handleAnalyzeFolderError(allocator, id, err);
     };
-    defer batch.deinit(allocator);
+    defer allocator.free(json);
 
     return switch (mode) {
-        .direct => {
-            const json = try app.batchToJson(allocator, batch);
-            defer allocator.free(json);
-            return jsonrpc.formatResponse(allocator, id, json);
-        },
-        .tool => {
-            const text = try app.batchToToolText(allocator, batch);
-            defer allocator.free(text);
-            return jsonrpc.formatToolResult(allocator, id, text, false);
-        },
+        .direct => jsonrpc.formatResponse(allocator, id, json),
+        .tool => jsonrpc.formatToolResult(allocator, id, json, false),
+    };
+}
+
+fn parseJsonOptions(arguments_object: protocol_parse.JsonObject) ?analyzer.JsonOptions {
+    const filter_name = protocol_parse.getOptionalStringField(arguments_object, "severity_filter") orelse
+        protocol_parse.getOptionalStringField(arguments_object, "filter");
+    const severity_filter = if (filter_name) |name|
+        analyzer.SeverityFilter.fromString(name) orelse return null
+    else
+        analyzer.SeverityFilter.all;
+    return .{ .severity_filter = severity_filter };
+}
+
+fn handleAnalyzeError(
+    allocator: std.mem.Allocator,
+    id: ?JsonValue,
+    err: anyerror,
+) ![]u8 {
+    return switch (err) {
+        error.UnsupportedFileExtension => jsonrpc.formatError(
+            allocator,
+            id,
+            -32602,
+            "unsupported file extension",
+        ),
+        error.FileNotFound => jsonrpc.formatError(
+            allocator,
+            id,
+            -32602,
+            "file or config path not found",
+        ),
+        else => err,
     };
 }
 
@@ -391,6 +423,12 @@ fn handleAnalyzeFolderError(
             id,
             -32602,
             "path must stay within the working directory or config root",
+        ),
+        error.FileNotFound, error.InvalidInput => jsonrpc.formatError(
+            allocator,
+            id,
+            -32602,
+            "path must be a directory",
         ),
         else => err,
     };
@@ -444,7 +482,8 @@ const ANALYZE_TOOL =
     "\"properties\":{" ++
     "\"file_path\":{\"type\":\"string\"}," ++
     "\"source\":{\"type\":\"string\"}," ++
-    "\"config_path\":{\"type\":\"string\"}" ++
+    "\"config_path\":{\"type\":\"string\"}," ++
+    "\"severity_filter\":{\"type\":\"string\",\"enum\":[\"all\",\"errors_only\",\"warnings_only\",\"clear_errors\"]}" ++
     "}," ++
     "\"required\":[\"file_path\",\"source\"]" ++
     "}" ++
@@ -468,7 +507,8 @@ const ANALYZE_BATCH_TOOL =
     "\"required\":[\"file_path\",\"source\"]" ++
     "}" ++
     "}," ++
-    "\"config_path\":{\"type\":\"string\"}" ++
+    "\"config_path\":{\"type\":\"string\"}," ++
+    "\"severity_filter\":{\"type\":\"string\",\"enum\":[\"all\",\"errors_only\",\"warnings_only\",\"clear_errors\"]}" ++
     "}," ++
     "\"required\":[\"files\"]" ++
     "}" ++
@@ -482,7 +522,8 @@ const ANALYZE_FOLDER_TOOL =
     "\"type\":\"object\"," ++
     "\"properties\":{" ++
     "\"path\":{\"type\":\"string\"}," ++
-    "\"config_path\":{\"type\":\"string\"}" ++
+    "\"config_path\":{\"type\":\"string\"}," ++
+    "\"severity_filter\":{\"type\":\"string\",\"enum\":[\"all\",\"errors_only\",\"warnings_only\",\"clear_errors\"]}" ++
     "}," ++
     "\"required\":[\"path\"]" ++
     "}" ++
@@ -562,7 +603,7 @@ test "protocol: analyze request returns file report with excerpt" {
 
     try testing.expect(std.mem.indexOf(u8, response.?, "sample.go") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "interface{}") != null);
-    try testing.expect(std.mem.indexOf(u8, response.?, "\\u001b[31m") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"severity\\\":\\\"error\\\"") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "banned_type") != null);
 }
 
@@ -596,10 +637,46 @@ test "protocol: analyze_batch aggregates results" {
     try testing.expect(response != null);
     defer testing.allocator.free(response.?);
 
-    try testing.expect(std.mem.indexOf(u8, response.?, "Scanned") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"file_count\\\":2") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "a.go") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "b.py") != null);
-    try testing.expect(std.mem.indexOf(u8, response.?, "\\u001b[90m") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"pass\\\":false") != null);
+}
+
+test "protocol: tool call supports warnings-only json filter" {
+    const request =
+        \\{
+        \\  "jsonrpc":"2.0",
+        \\  "id":"filter-1",
+        \\  "method":"tools/call",
+        \\  "params":{
+        \\    "name":"analyze_batch",
+        \\    "arguments":{
+        \\      "severity_filter":"warnings_only",
+        \\      "files":[
+        \\        {
+        \\          "file_path":"a.go",
+        \\          "source":"func A(data interface{}) {\n    return\n}"
+        \\        },
+        \\        {
+        \\          "file_path":"b.ts",
+        \\          "source":"export const logValue = (): void => { console.log(1); }\n"
+        \\        }
+        \\      ]
+        \\    }
+        \\  }
+        \\}
+    ;
+    const framed_request = try jsonrpc.frameMessage(testing.allocator, request);
+    defer testing.allocator.free(framed_request);
+
+    const response = try processInput(testing.allocator, framed_request);
+    try testing.expect(response != null);
+    defer testing.allocator.free(response.?);
+
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"error_count\\\":0") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"severity\\\":\\\"error\\\"") == null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"severity\\\":\\\"warn\\\"") != null);
 }
 
 test "protocol: analyze_folder scans supported files recursively" {
@@ -735,10 +812,10 @@ test "protocol: analyze_folder supports explicit absolute config path via tools/
     defer testing.allocator.free(response.?);
 
     try testing.expect(std.mem.indexOf(u8, response.?, "\"isError\":false") != null);
-    try testing.expect(std.mem.indexOf(u8, response.?, "Scanned") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"file_count\\\":2") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "a.go") != null);
     try testing.expect(std.mem.indexOf(u8, response.?, "b.go") != null);
-    try testing.expect(std.mem.indexOf(u8, response.?, "PASS") != null);
+    try testing.expect(std.mem.indexOf(u8, response.?, "\\\"pass\\\":true") != null);
 }
 
 test "protocol: analyze request surfaces design rule ids" {

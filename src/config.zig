@@ -19,6 +19,7 @@ pub const Config = config_schema.Config;
 
 pub const LoadedConfig = config_loader.LoadedConfig;
 pub const default_config_name = config_loader.default_config_name;
+pub const legacy_config_name = config_loader.legacy_config_name;
 pub const loadForTarget = config_loader.loadForTarget;
 pub const resolveCacheKey = config_loader.resolveCacheKey;
 

@@ -16,10 +16,7 @@ pub fn collectSourceFiles(
     var paths = std.array_list.Managed([]const u8).init(allocator);
     errdefer freeOwnedStrings(allocator, paths.items);
 
-    const absolute_root = if (std.fs.path.isAbsolute(root_path))
-        try allocator.dupe(u8, root_path)
-    else
-        try std.fs.realpathAlloc(allocator, root_path);
+    const absolute_root = try resolveRootPath(allocator, root_path);
     defer allocator.free(absolute_root);
 
     try collectSourceFilesRecursive(allocator, absolute_root, cfg, &paths);
@@ -47,10 +44,23 @@ pub fn freeOwnedStrings(allocator: std.mem.Allocator, values: []const []const u8
 }
 
 fn ensureDirectory(path: []const u8) !void {
-    const stat = try statPath(path);
+    const stat = statPath(path) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return FolderError.NotDirectory,
+        else => return err,
+    };
     if (stat.kind != .directory) {
         return FolderError.NotDirectory;
     }
+}
+
+fn resolveRootPath(allocator: std.mem.Allocator, root_path: []const u8) ![]const u8 {
+    if (std.fs.path.isAbsolute(root_path)) {
+        return allocator.dupe(u8, root_path);
+    }
+    return std.fs.realpathAlloc(allocator, root_path) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return FolderError.NotDirectory,
+        else => return err,
+    };
 }
 
 fn collectSourceFilesRecursive(
@@ -94,4 +104,30 @@ fn statPath(path: []const u8) !std.fs.File.Stat {
     }
 
     return std.fs.cwd().statFile(path);
+}
+
+const testing = std.testing;
+const test_config = @import("test_config.zig");
+
+test "source files: missing folder path is a folder error" {
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    try testing.expectError(
+        FolderError.NotDirectory,
+        collectSourceFiles(testing.allocator, "clerm_registry", loaded.value),
+    );
+}
+
+test "source files: relative folder paths resolve before recursion" {
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const paths = try collectSourceFiles(testing.allocator, "samples", loaded.value);
+    defer freeOwnedStrings(testing.allocator, paths);
+
+    try testing.expect(paths.len > 0);
+    for (paths) |path| {
+        try testing.expect(std.fs.path.isAbsolute(path));
+    }
 }

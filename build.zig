@@ -22,8 +22,33 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const static_lib = b.addLibrary(.{
+        .name = "guardian",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+
+    const shared_lib = b.addLibrary(.{
+        .name = "guardian",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+
     b.installArtifact(server_exe);
     b.installArtifact(cli_exe);
+    b.installArtifact(static_lib);
+    b.installArtifact(shared_lib);
+    b.getInstallStep().dependOn(&b.addInstallHeaderFile(b.path("include/guardian.h"), "guardian.h").step);
 
     const run_cmd = b.addRunArtifact(server_exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -36,6 +61,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
 

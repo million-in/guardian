@@ -214,25 +214,47 @@ pub fn analyzeFolderResolved(
 }
 
 pub fn batchToJson(allocator: std.mem.Allocator, batch: BatchResult) ![]u8 {
+    return batchToJsonWithOptions(allocator, batch, .{});
+}
+
+pub fn batchToJsonWithOptions(
+    allocator: std.mem.Allocator,
+    batch: BatchResult,
+    options: analyzer.JsonOptions,
+) ![]u8 {
     var buf = std.array_list.Managed(u8).init(allocator);
     const writer = buf.writer();
+    const counts = countIncludedBatchViolations(batch, options.severity_filter);
 
     try writer.writeAll("{");
     try std.fmt.format(writer, "\"file_count\":{d},", .{batch.file_count});
-    try std.fmt.format(writer, "\"error_count\":{d},", .{batch.error_count});
-    try std.fmt.format(writer, "\"warn_count\":{d},", .{batch.warn_count});
-    try std.fmt.format(writer, "\"pass\":{},", .{batch.pass});
+    try std.fmt.format(writer, "\"error_count\":{d},", .{counts.errors});
+    try std.fmt.format(writer, "\"warn_count\":{d},", .{counts.warns});
+    try std.fmt.format(writer, "\"pass\":{},", .{counts.errors == 0});
     try writer.writeAll("\"results\":[");
     for (batch.results, 0..) |result, idx| {
         if (idx > 0) {
             try writer.writeAll(",");
         }
-        const json = try analyzer.resultToJson(allocator, result);
+        const json = try analyzer.resultToJsonWithOptions(allocator, result, options);
         defer allocator.free(json);
         try writer.writeAll(json);
     }
     try writer.writeAll("]}");
     return buf.toOwnedSlice();
+}
+
+fn countIncludedBatchViolations(
+    batch: BatchResult,
+    severity_filter: analyzer.SeverityFilter,
+) analyzer.SeverityCounts {
+    var counts = analyzer.SeverityCounts{};
+    for (batch.results) |result| {
+        const result_counts = analyzer.countIncludedViolations(result, severity_filter);
+        counts.errors += result_counts.errors;
+        counts.warns += result_counts.warns;
+    }
+    return counts;
 }
 
 pub fn resultToPretty(allocator: std.mem.Allocator, result: AnalysisResult) ![]u8 {
@@ -434,6 +456,79 @@ test "app: explicit design limits apply through resolved configs" {
     try testing.expect(resultHasRule(batch.results[0], .too_many_arguments));
     try testing.expect(resultHasRule(batch.results[0], .too_many_fields));
     try testing.expect(resultHasRule(batch.results[0], .hidden_coupling));
+}
+
+test "app: folder rendering survives configured pattern messages after resolver teardown" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    const config_json = try test_config.stringify(testing.allocator, loaded_default.value);
+    defer testing.allocator.free(config_json);
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "guardian.config.json",
+        .data = config_json,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.ts",
+        .data =
+        \\export const logValue = (): void => {
+        \\    console.log(1);
+        \\};
+        ,
+    });
+
+    const folder_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(folder_path);
+
+    var batch = try analyzeFolderResolved(testing.allocator, folder_path, null);
+    defer batch.deinit(testing.allocator);
+
+    const pretty = try batchToPretty(testing.allocator, batch);
+    defer testing.allocator.free(pretty);
+    try testing.expect(std.mem.indexOf(u8, pretty, "remove console logging before submission") != null);
+
+    const json = try batchToJson(testing.allocator, batch);
+    defer testing.allocator.free(json);
+    try testing.expect(std.mem.indexOf(u8, json, "remove console logging before submission") != null);
+}
+
+test "app: batch json can hide errors or warnings through library options" {
+    var loaded_default = try test_config.loadDefault(testing.allocator);
+    defer loaded_default.deinit();
+
+    const inputs = [_]FileInput{
+        .{
+            .file_path = "bad.go",
+            .source = "func Process(data interface{}) {}\n",
+        },
+        .{
+            .file_path = "warn.ts",
+            .source = "export const logValue = (): void => { console.log(1); }\n",
+        },
+    };
+
+    var batch = try analyzeBatchInputs(testing.allocator, &inputs, loaded_default.value);
+    defer batch.deinit(testing.allocator);
+
+    const warnings_json = try batchToJsonWithOptions(testing.allocator, batch, .{
+        .severity_filter = .warnings_only,
+    });
+    defer testing.allocator.free(warnings_json);
+    try testing.expect(std.mem.indexOf(u8, warnings_json, "\"error_count\":0") != null);
+    try testing.expect(std.mem.indexOf(u8, warnings_json, "\"severity\":\"error\"") == null);
+    try testing.expect(std.mem.indexOf(u8, warnings_json, "\"severity\":\"warn\"") != null);
+
+    const errors_json = try batchToJsonWithOptions(testing.allocator, batch, .{
+        .severity_filter = .errors_only,
+    });
+    defer testing.allocator.free(errors_json);
+    try testing.expect(std.mem.indexOf(u8, errors_json, "\"warn_count\":0") != null);
+    try testing.expect(std.mem.indexOf(u8, errors_json, "\"severity\":\"warn\"") == null);
+    try testing.expect(std.mem.indexOf(u8, errors_json, "\"severity\":\"error\"") != null);
 }
 
 fn resultHasRule(result: AnalysisResult, rule: types.Rule) bool {

@@ -6,7 +6,7 @@ cd "$ROOT"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/guardian-mcp.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
-absolute_config="$ROOT/guardian.config.json"
+absolute_config="$ROOT/guardian.config.yaml"
 
 ./scripts/guardian-check.sh analyze samples/go_bad.go > "$tmp_dir/analyze.json"
 jq -e '.result.pass == false' "$tmp_dir/analyze.json" >/dev/null
@@ -53,7 +53,8 @@ make_payload "$tool_body" \
   | awk 'body{print} /^$/{body=1}' \
   > "$tmp_dir/tool.json"
 
-jq -e '.result.content[0].text | contains("banned_type") and contains("\u001b[31m")' "$tmp_dir/tool.json" >/dev/null
+jq -e '.result.content[0].text | fromjson | .pass == false' "$tmp_dir/tool.json" >/dev/null
+jq -e '.result.content[0].text | fromjson | any(.violations[]; .rule == "banned_type")' "$tmp_dir/tool.json" >/dev/null
 
 tool_folder_body="$(jq -nc \
   --arg path "$ROOT/src" \
@@ -77,4 +78,4 @@ make_payload "$tool_folder_body" \
   | awk 'body{print} /^$/{body=1}' \
   > "$tmp_dir/tool-folder.json"
 
-jq -e '.result.content[0].text | contains("Scanned") and contains("PASS")' "$tmp_dir/tool-folder.json" >/dev/null
+jq -e '.result.content[0].text | fromjson | .file_count > 0 and .pass == true' "$tmp_dir/tool-folder.json" >/dev/null
