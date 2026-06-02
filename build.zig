@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
         .name = "guardian",
         .linkage = .static,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
+            .root_source_file = b.path("src/c_api.zig"),
             .target = target,
             .optimize = optimize,
             .link_libc = true,
@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
         .name = "guardian",
         .linkage = .dynamic,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
+            .root_source_file = b.path("src/c_api.zig"),
             .target = target,
             .optimize = optimize,
             .link_libc = true,
@@ -61,7 +61,6 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .link_libc = true,
         }),
     });
 
