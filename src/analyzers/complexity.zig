@@ -30,7 +30,7 @@ pub fn analyzeBraceComplexity(
     var in_block_comment = false;
 
     for (lines, 0..) |line, line_idx| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) continue;
 
         // Skip comments
@@ -116,7 +116,7 @@ pub fn analyzePythonComplexity(
     var complexity: u32 = 1;
 
     for (lines, 0..) |line, line_idx| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
         const ws = types.leadingWhitespace(line);
@@ -619,14 +619,14 @@ fn extractGoFuncName(trimmed: []const u8) []const u8 {
         return "<anonymous>";
     }
 
-    var search = std.mem.trimLeft(u8, trimmed["func ".len..], " \t");
+    var search = std.mem.trimStart(u8, trimmed["func ".len..], " \t");
     if (search.len == 0) {
         return "<anonymous>";
     }
 
     if (search[0] == '(') {
         const receiver_end = std.mem.indexOfScalar(u8, search, ')') orelse return "<anonymous>";
-        search = std.mem.trimLeft(u8, search[receiver_end + 1 ..], " \t");
+        search = std.mem.trimStart(u8, search[receiver_end + 1 ..], " \t");
     }
 
     return trimIdentifier(search);

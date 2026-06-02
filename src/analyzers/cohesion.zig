@@ -27,9 +27,9 @@ pub fn analyzeCohesion(
     var func_base: i32 = 0;
 
     for (masked_lines, 0..) |line, line_idx| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         const raw_trimmed = if (line_idx < raw_lines.len)
-            std.mem.trimLeft(u8, raw_lines[line_idx], " \t")
+            std.mem.trimStart(u8, raw_lines[line_idx], " \t")
         else
             trimmed;
 
@@ -285,14 +285,14 @@ fn extractGoFuncName(trimmed: []const u8) []const u8 {
         return "<unknown>";
     }
 
-    var after = std.mem.trimLeft(u8, trimmed["func ".len..], " \t");
+    var after = std.mem.trimStart(u8, trimmed["func ".len..], " \t");
     if (after.len == 0) {
         return "<unknown>";
     }
 
     if (after[0] == '(') {
         const receiver_end = std.mem.indexOfScalar(u8, after, ')') orelse return "<unknown>";
-        after = std.mem.trimLeft(u8, after[receiver_end + 1 ..], " \t");
+        after = std.mem.trimStart(u8, after[receiver_end + 1 ..], " \t");
     }
 
     return trimIdentifier(after);
@@ -393,7 +393,7 @@ fn stripTsMethodModifiers(trimmed: []const u8) []const u8 {
             "set ",
         }) |prefix| {
             if (std.mem.startsWith(u8, text, prefix)) {
-                text = std.mem.trimLeft(u8, text[prefix.len..], " \t");
+                text = std.mem.trimStart(u8, text[prefix.len..], " \t");
                 changed = true;
             }
         }

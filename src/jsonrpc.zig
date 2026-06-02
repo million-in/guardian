@@ -7,8 +7,9 @@ pub fn formatResponse(
     id: ?JsonValue,
     result_json: []const u8,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try writeJsonId(writer, id);
@@ -24,15 +25,16 @@ pub fn formatToolResult(
     text: []const u8,
     is_error: bool,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try writeJsonId(writer, id);
     try writer.writeAll(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"");
     try writeJsonEscaped(writer, text);
     try writer.writeAll("\"}],\"isError\":");
-    try std.fmt.format(writer, "{}", .{is_error});
+    try writer.print("{}", .{is_error});
     try writer.writeAll("}}");
     return buf.toOwnedSlice();
 }
@@ -43,12 +45,13 @@ pub fn formatError(
     code: i32,
     message: []const u8,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try writeJsonId(writer, id);
-    try std.fmt.format(writer, ",\"error\":{{\"code\":{d},\"message\":\"", .{code});
+    try writer.print(",\"error\":{{\"code\":{d},\"message\":\"", .{code});
     try writeJsonEscaped(writer, message);
     try writer.writeAll("\"}}}");
     return buf.toOwnedSlice();
@@ -62,8 +65,8 @@ pub fn writeJsonId(writer: anytype, id: ?JsonValue) !void {
 
     switch (value) {
         .null => try writer.writeAll("null"),
-        .integer => |number| try std.fmt.format(writer, "{}", .{number}),
-        .float => |number| try std.fmt.format(writer, "{}", .{number}),
+        .integer => |number| try writer.print("{}", .{number}),
+        .float => |number| try writer.print("{}", .{number}),
         .number_string => |number| try writer.writeAll(number),
         .string => |string| {
             try writer.writeByte('"');
@@ -95,8 +98,9 @@ pub fn startsWithIgnoreCase(haystack: []const u8, prefix: []const u8) bool {
 }
 
 pub fn frameMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
-    var framed = std.array_list.Managed(u8).init(allocator);
-    const writer = framed.writer();
+    var framed: std.Io.Writer.Allocating = .init(allocator);
+    errdefer framed.deinit();
+    const writer = &framed.writer;
     try writer.print("Content-Length: {d}\r\n\r\n", .{payload.len});
     try writer.writeAll(payload);
     return framed.toOwnedSlice();

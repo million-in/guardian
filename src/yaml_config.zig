@@ -31,7 +31,7 @@ fn collectLines(
     var iter = std.mem.splitScalar(u8, source, '\n');
 
     while (iter.next()) |raw_line| {
-        const without_cr = std.mem.trimRight(u8, raw_line, "\r");
+        const without_cr = std.mem.trimEnd(u8, raw_line, "\r");
         const trimmed = std.mem.trim(u8, stripComment(without_cr), " \t");
         if (trimmed.len == 0) {
             continue;
@@ -49,17 +49,18 @@ const Parser = struct {
     allocator: std.mem.Allocator,
     lines: []const Line,
     index: usize = 0,
-    buf: std.array_list.Managed(u8),
+    buf: std.Io.Writer.Allocating,
 
     fn init(allocator: std.mem.Allocator, lines: []const Line) Parser {
         return .{
             .allocator = allocator,
             .lines = lines,
-            .buf = std.array_list.Managed(u8).init(allocator),
+            .buf = .init(allocator),
         };
     }
 
     fn parse(self: *Parser) anyerror![]u8 {
+        errdefer self.buf.deinit();
         try self.writeBlock(self.lines[0].indent);
         if (self.index != self.lines.len) {
             return error.InvalidConfig;
@@ -82,7 +83,7 @@ const Parser = struct {
     }
 
     fn writeMapping(self: *Parser, indent: usize) anyerror!void {
-        try self.buf.append('{');
+        try self.buf.writer.writeByte('{');
         var first = true;
         while (self.index < self.lines.len) {
             const line = self.lines[self.index];
@@ -94,11 +95,11 @@ const Parser = struct {
             }
             try self.writeField(line.text, indent, &first);
         }
-        try self.buf.append('}');
+        try self.buf.writer.writeByte('}');
     }
 
     fn writeSequence(self: *Parser, indent: usize) anyerror!void {
-        try self.buf.append('[');
+        try self.buf.writer.writeByte('[');
         var first = true;
         while (self.index < self.lines.len) {
             const line = self.lines[self.index];
@@ -109,12 +110,12 @@ const Parser = struct {
                 return error.InvalidConfig;
             }
             if (!first) {
-                try self.buf.append(',');
+                try self.buf.writer.writeByte(',');
             }
             first = false;
             try self.writeSequenceItem(line.text[2..], indent);
         }
-        try self.buf.append(']');
+        try self.buf.writer.writeByte(']');
     }
 
     fn writeSequenceItem(self: *Parser, raw_item: []const u8, indent: usize) anyerror!void {
@@ -132,7 +133,7 @@ const Parser = struct {
     }
 
     fn writeSequenceObject(self: *Parser, first_pair: Pair, indent: usize) anyerror!void {
-        try self.buf.append('{');
+        try self.buf.writer.writeByte('{');
         var first = true;
         try self.writePair(first_pair, indent, &first);
 
@@ -143,7 +144,7 @@ const Parser = struct {
             }
         }
 
-        try self.buf.append('}');
+        try self.buf.writer.writeByte('}');
     }
 
     fn writeField(self: *Parser, text: []const u8, indent: usize, first: *bool) anyerror!void {
@@ -154,13 +155,13 @@ const Parser = struct {
 
     fn writePair(self: *Parser, pair: Pair, indent: usize, first: *bool) anyerror!void {
         if (!first.*) {
-            try self.buf.append(',');
+            try self.buf.writer.writeByte(',');
         }
         first.* = false;
 
-        try self.buf.append('"');
-        try jsonrpc.writeJsonEscaped(self.buf.writer(), pair.key);
-        try self.buf.appendSlice("\":");
+        try self.buf.writer.writeByte('"');
+        try jsonrpc.writeJsonEscaped(&self.buf.writer, pair.key);
+        try self.buf.writer.writeAll("\":");
         if (pair.value.len == 0) {
             try self.writeNestedValue(indent);
             return;
@@ -181,20 +182,20 @@ const Parser = struct {
             return error.InvalidConfig;
         }
         if (isInlineJson(value)) {
-            try self.buf.appendSlice(value);
+            try self.buf.writer.writeAll(value);
             return;
         }
         if (isQuoted(value)) {
-            try writeQuotedString(self.buf.writer(), value);
+            try writeQuotedString(&self.buf.writer, value);
             return;
         }
         if (isJsonLiteral(value)) {
-            try self.buf.appendSlice(value);
+            try self.buf.writer.writeAll(value);
             return;
         }
-        try self.buf.append('"');
-        try jsonrpc.writeJsonEscaped(self.buf.writer(), value);
-        try self.buf.append('"');
+        try self.buf.writer.writeByte('"');
+        try jsonrpc.writeJsonEscaped(&self.buf.writer, value);
+        try self.buf.writer.writeByte('"');
     }
 };
 

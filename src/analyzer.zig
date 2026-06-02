@@ -153,18 +153,19 @@ pub fn resultToJsonWithOptions(
     result: AnalysisResult,
     options: JsonOptions,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
     const counts = countIncludedViolations(result, options.severity_filter);
 
     try writer.writeAll("{\"file_path\":\"");
     try writeJsonEscaped(writer, result.file_path);
     try writer.writeAll("\",\"language\":\"");
     try writeJsonEscaped(writer, @tagName(result.language));
-    try std.fmt.format(writer, "\",\"line_count\":{d},", .{result.line_count});
-    try std.fmt.format(writer, "\"error_count\":{d},", .{counts.errors});
-    try std.fmt.format(writer, "\"warn_count\":{d},", .{counts.warns});
-    try std.fmt.format(writer, "\"pass\":{},", .{counts.errors == 0});
+    try writer.print("\",\"line_count\":{d},", .{result.line_count});
+    try writer.print("\"error_count\":{d},", .{counts.errors});
+    try writer.print("\"warn_count\":{d},", .{counts.warns});
+    try writer.print("\"pass\":{},", .{counts.errors == 0});
     try writer.writeAll("\"violations\":[");
 
     var written: usize = 0;
@@ -176,11 +177,11 @@ pub fn resultToJsonWithOptions(
         if (written > 0) try writer.writeAll(",");
         written += 1;
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"line\":{d},", .{v.line});
-        try std.fmt.format(writer, "\"column\":{d},", .{v.column});
-        try std.fmt.format(writer, "\"end_line\":{d},", .{v.end_line});
-        try std.fmt.format(writer, "\"rule\":\"{s}\",", .{v.rule.toString()});
-        try std.fmt.format(writer, "\"severity\":\"{s}\",", .{v.severity.toString()});
+        try writer.print("\"line\":{d},", .{v.line});
+        try writer.print("\"column\":{d},", .{v.column});
+        try writer.print("\"end_line\":{d},", .{v.end_line});
+        try writer.print("\"rule\":\"{s}\",", .{v.rule.toString()});
+        try writer.print("\"severity\":\"{s}\",", .{v.severity.toString()});
         // Escape message for JSON
         try writer.writeAll("\"message\":\"");
         try writeJsonEscaped(writer, v.message);
@@ -248,25 +249,26 @@ fn buildExcerpt(
     const capped_end = @min(requested_end, start_idx + @as(usize, max_lines));
     const max_chars_usize = @as(usize, max_chars);
 
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
     var truncated = false;
 
     var idx = start_idx;
     while (idx < capped_end) : (idx += 1) {
         const current = types.trimRight(raw_lines[idx]);
-        if (buf.items.len > 0) {
-            if (buf.items.len >= max_chars_usize) {
+        if (buf.written().len > 0) {
+            if (buf.written().len >= max_chars_usize) {
                 truncated = true;
                 break;
             }
             try writer.writeByte('\n');
         }
-        if (buf.items.len >= max_chars_usize) {
+        if (buf.written().len >= max_chars_usize) {
             truncated = true;
             break;
         }
-        const remaining = max_chars_usize - buf.items.len;
+        const remaining = max_chars_usize - buf.written().len;
         if (current.len > remaining) {
             if (remaining > 0) {
                 try writer.writeAll(current[0..remaining]);
@@ -278,7 +280,8 @@ fn buildExcerpt(
     }
 
     if (requested_end > capped_end or truncated) {
-        if (buf.items.len > 0 and buf.items[buf.items.len - 1] != '\n') {
+        const written = buf.written();
+        if (written.len > 0 and written[written.len - 1] != '\n') {
             try writer.writeByte('\n');
         }
         try writer.writeAll("...");

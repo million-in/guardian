@@ -7,7 +7,7 @@ It also reports cross-language design smells such as oversized signatures, overs
 
 ## Requirements
 
-- Zig `>= 0.15.2`
+- Zig `>= 0.16.0`
 
 ## Build
 

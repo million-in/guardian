@@ -1,5 +1,6 @@
 const std = @import("std");
 const analyzer = @import("analyzer.zig");
+const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
 const config_resolver = @import("config_resolver.zig");
 const reporting = @import("reporting.zig");
@@ -222,15 +223,16 @@ pub fn batchToJsonWithOptions(
     batch: BatchResult,
     options: analyzer.JsonOptions,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
     const counts = countIncludedBatchViolations(batch, options.severity_filter);
 
     try writer.writeAll("{");
-    try std.fmt.format(writer, "\"file_count\":{d},", .{batch.file_count});
-    try std.fmt.format(writer, "\"error_count\":{d},", .{counts.errors});
-    try std.fmt.format(writer, "\"warn_count\":{d},", .{counts.warns});
-    try std.fmt.format(writer, "\"pass\":{},", .{counts.errors == 0});
+    try writer.print("\"file_count\":{d},", .{batch.file_count});
+    try writer.print("\"error_count\":{d},", .{counts.errors});
+    try writer.print("\"warn_count\":{d},", .{counts.warns});
+    try writer.print("\"pass\":{},", .{counts.errors == 0});
     try writer.writeAll("\"results\":[");
     for (batch.results, 0..) |result, idx| {
         if (idx > 0) {
@@ -295,8 +297,8 @@ test "app: batch resolved configs support mixed monorepos" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makePath("pkg_a");
-    try tmp.dir.makePath("pkg_b");
+    try compat.dirMakePath(tmp.dir, "pkg_a");
+    try compat.dirMakePath(tmp.dir, "pkg_b");
 
     var loaded_default = try test_config.loadDefault(testing.allocator);
     defer loaded_default.deinit();
@@ -306,41 +308,35 @@ test "app: batch resolved configs support mixed monorepos" {
     const pkg_a_json = try test_config.stringify(testing.allocator, pkg_a_cfg);
     defer testing.allocator.free(pkg_a_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg_a/guardian.config.json",
-        .data = pkg_a_json,
-    });
+    try compat.dirWriteFile(tmp.dir, "pkg_a/guardian.config.json", pkg_a_json);
 
     var pkg_b_cfg = loaded_default.value;
     pkg_b_cfg.go.ban_generics = false;
     const pkg_b_json = try test_config.stringify(testing.allocator, pkg_b_cfg);
     defer testing.allocator.free(pkg_b_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg_b/guardian.config.json",
-        .data = pkg_b_json,
-    });
+    try compat.dirWriteFile(tmp.dir, "pkg_b/guardian.config.json", pkg_b_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg_a/a.go",
-        .data =
+    try compat.dirWriteFile(
+        tmp.dir,
+        "pkg_a/a.go",
         \\func Map[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg_b/b.go",
-        .data =
+    );
+    try compat.dirWriteFile(
+        tmp.dir,
+        "pkg_b/b.go",
         \\func Map[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
+    );
 
-    const file_a = try tmp.dir.realpathAlloc(testing.allocator, "pkg_a/a.go");
+    const file_a = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "pkg_a/a.go");
     defer testing.allocator.free(file_a);
-    const file_b = try tmp.dir.realpathAlloc(testing.allocator, "pkg_b/b.go");
+    const file_b = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "pkg_b/b.go");
     defer testing.allocator.free(file_b);
 
     const paths = [_][]const u8{ file_a, file_b };
@@ -371,32 +367,29 @@ test "app: batch resolved explicit absolute config path can be reused" {
     const config_json = try test_config.stringify(testing.allocator, cfg);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
-        .data = config_json,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "a.go",
-        .data =
+    try compat.dirWriteFile(tmp.dir, "guardian.config.json", config_json);
+    try compat.dirWriteFile(
+        tmp.dir,
+        "a.go",
         \\func Map[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "b.go",
-        .data =
+    );
+    try compat.dirWriteFile(
+        tmp.dir,
+        "b.go",
         \\func Reduce[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
+    );
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
-    const file_a = try tmp.dir.realpathAlloc(testing.allocator, "a.go");
+    const file_a = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "a.go");
     defer testing.allocator.free(file_a);
-    const file_b = try tmp.dir.realpathAlloc(testing.allocator, "b.go");
+    const file_b = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "b.go");
     defer testing.allocator.free(file_b);
 
     const paths = [_][]const u8{ file_a, file_b };
@@ -422,13 +415,10 @@ test "app: explicit design limits apply through resolved configs" {
     const config_json = try test_config.stringify(testing.allocator, cfg);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
-        .data = config_json,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "design.go",
-        .data =
+    try compat.dirWriteFile(tmp.dir, "guardian.config.json", config_json);
+    try compat.dirWriteFile(
+        tmp.dir,
+        "design.go",
         \\package sample
         \\
         \\type Session struct {
@@ -440,11 +430,11 @@ test "app: explicit design limits apply through resolved configs" {
         \\    return run(pkg.Load(), repo.Fetch(), service.Call())
         \\}
         ,
-    });
+    );
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
-    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "design.go");
+    const file_path = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "design.go");
     defer testing.allocator.free(file_path);
 
     const paths = [_][]const u8{file_path};
@@ -468,20 +458,17 @@ test "app: folder rendering survives configured pattern messages after resolver 
     const config_json = try test_config.stringify(testing.allocator, loaded_default.value);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
-        .data = config_json,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "a.ts",
-        .data =
+    try compat.dirWriteFile(tmp.dir, "guardian.config.json", config_json);
+    try compat.dirWriteFile(
+        tmp.dir,
+        "a.ts",
         \\export const logValue = (): void => {
         \\    console.log(1);
         \\};
         ,
-    });
+    );
 
-    const folder_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    const folder_path = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, ".");
     defer testing.allocator.free(folder_path);
 
     var batch = try analyzeFolderResolved(testing.allocator, folder_path, null);

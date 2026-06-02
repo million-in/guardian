@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
 
 pub const FolderError = error{
@@ -28,12 +29,10 @@ pub fn collectSourceFiles(
 
 pub fn readFileAlloc(allocator: std.mem.Allocator, file_path: []const u8) ![]u8 {
     if (std.fs.path.isAbsolute(file_path)) {
-        const file = try std.fs.openFileAbsolute(file_path, .{});
-        defer file.close();
-        return file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        return compat.readFileAllocAbsolute(allocator, file_path, std.math.maxInt(usize));
     }
 
-    return std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize));
+    return compat.readFileAlloc(allocator, file_path, std.math.maxInt(usize));
 }
 
 pub fn freeOwnedStrings(allocator: std.mem.Allocator, values: []const []const u8) void {
@@ -57,7 +56,7 @@ fn resolveRootPath(allocator: std.mem.Allocator, root_path: []const u8) ![]const
     if (std.fs.path.isAbsolute(root_path)) {
         return allocator.dupe(u8, root_path);
     }
-    return std.fs.realpathAlloc(allocator, root_path) catch |err| switch (err) {
+    return compat.realpathAlloc(allocator, root_path) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => return FolderError.NotDirectory,
         else => return err,
     };
@@ -69,11 +68,11 @@ fn collectSourceFilesRecursive(
     cfg: guardian_config.Config,
     paths: *std.array_list.Managed([]const u8),
 ) !void {
-    var dir = try std.fs.openDirAbsolute(current_path, .{ .iterate = true });
-    defer dir.close();
+    var dir = try compat.openDirAbsolute(current_path, .{ .iterate = true });
+    defer dir.close(compat.io);
 
     var iterator = dir.iterate();
-    while (try iterator.next()) |entry| {
+    while (try iterator.next(compat.io)) |entry| {
         if (entry.kind == .directory and cfg.isIgnoredDir(entry.name)) {
             continue;
         }
@@ -96,14 +95,14 @@ fn collectSourceFilesRecursive(
     }
 }
 
-fn statPath(path: []const u8) !std.fs.File.Stat {
+fn statPath(path: []const u8) !std.Io.File.Stat {
     if (std.fs.path.isAbsolute(path)) {
-        var dir = try std.fs.openDirAbsolute(path, .{});
-        defer dir.close();
-        return dir.stat();
+        var dir = try compat.openDirAbsolute(path, .{});
+        defer dir.close(compat.io);
+        return dir.stat(compat.io);
     }
 
-    return std.fs.cwd().statFile(path);
+    return std.Io.Dir.cwd().statFile(compat.io, path, .{});
 }
 
 const testing = std.testing;

@@ -1,5 +1,6 @@
 const std = @import("std");
 const analyzer = @import("analyzer.zig");
+const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
 const guardian = @import("root.zig");
 const jsonrpc = @import("jsonrpc.zig");
@@ -27,16 +28,21 @@ const Method = protocol_parse.Method;
 const max_content_length_bytes = 64 * 1024 * 1024;
 
 pub fn run(allocator: std.mem.Allocator) !void {
-    const stdin = std.fs.File.stdin().deprecatedReader();
-    const stdout = std.fs.File.stdout().deprecatedWriter();
-    const stderr = std.fs.File.stderr().deprecatedWriter();
+    var stdin_buffer: [16 * 1024]u8 = undefined;
+    var stdout_buffer: [16 * 1024]u8 = undefined;
+    var stderr_buffer: [16 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().readerStreaming(compat.io, &stdin_buffer);
+    var stdout = std.Io.File.stdout().writerStreaming(compat.io, &stdout_buffer);
+    var stderr = std.Io.File.stderr().writerStreaming(compat.io, &stderr_buffer);
+    defer stdout.interface.flush() catch {};
+    defer stderr.interface.flush() catch {};
 
     while (true) {
-        const message = readMessagePayload(allocator, stdin) catch |err| {
-            try stderr.print("code-guardian-mcp: invalid message: {}\n", .{err});
+        const message = readMessagePayload(allocator, &stdin.interface) catch |err| {
+            try stderr.interface.print("code-guardian-mcp: invalid message: {}\n", .{err});
             const error_response = try jsonrpc.formatError(allocator, null, -32700, "invalid message");
             defer allocator.free(error_response);
-            try writeMessage(stdout, error_response, .raw_line);
+            try writeMessage(&stdout.interface, error_response, .raw_line);
             break;
         };
         if (message == null) {
@@ -45,23 +51,23 @@ pub fn run(allocator: std.mem.Allocator) !void {
         defer allocator.free(message.?.payload);
 
         const response = handleMessage(allocator, message.?.payload) catch |err| {
-            try stderr.print("code-guardian-mcp: request failed: {}\n", .{err});
+            try stderr.interface.print("code-guardian-mcp: request failed: {}\n", .{err});
             const error_response = try jsonrpc.formatError(allocator, null, -32603, "internal server error");
             defer allocator.free(error_response);
-            try writeMessage(stdout, error_response, message.?.transport);
+            try writeMessage(&stdout.interface, error_response, message.?.transport);
             continue;
         };
 
         if (response) |json| {
             defer allocator.free(json);
-            try writeMessage(stdout, json, message.?.transport);
+            try writeMessage(&stdout.interface, json, message.?.transport);
         }
     }
 }
 
 pub fn processInput(allocator: std.mem.Allocator, input: []const u8) !?[]u8 {
-    var stream = std.io.fixedBufferStream(input);
-    const message = (try readMessagePayload(allocator, stream.reader())) orelse return null;
+    var stream: std.Io.Reader = .fixed(input);
+    const message = (try readMessagePayload(allocator, &stream)) orelse return null;
     defer allocator.free(message.payload);
 
     const response = try handleMessage(allocator, message.payload);
@@ -76,9 +82,8 @@ pub fn processInput(allocator: std.mem.Allocator, input: []const u8) !?[]u8 {
     };
 }
 
-fn readMessagePayload(allocator: std.mem.Allocator, reader: anytype) !?Message {
-    var line_buf: [16 * 1024]u8 = undefined;
-    const first_line = (try readNextSignificantLine(reader, &line_buf)) orelse return null;
+fn readMessagePayload(allocator: std.mem.Allocator, reader: *std.Io.Reader) !?Message {
+    const first_line = (try readNextSignificantLine(reader)) orelse return null;
 
     if (!jsonrpc.startsWithIgnoreCase(first_line, "Content-Length:")) {
         return Message{
@@ -88,7 +93,7 @@ fn readMessagePayload(allocator: std.mem.Allocator, reader: anytype) !?Message {
     }
 
     const content_length = try parseContentLength(first_line);
-    try consumeHeaders(reader, &line_buf);
+    try consumeHeaders(reader);
     return Message{
         .payload = try readPayloadBytes(allocator, reader, content_length),
         .transport = .framed,
@@ -108,14 +113,14 @@ fn writeMessage(writer: anytype, payload: []const u8, transport: TransportMode) 
     }
 }
 
-fn readNextSignificantLine(reader: anytype, line_buf: []u8) !?[]const u8 {
+fn readNextSignificantLine(reader: *std.Io.Reader) !?[]const u8 {
     while (true) {
-        const maybe_line = try reader.readUntilDelimiterOrEof(line_buf, '\n');
+        const maybe_line = try reader.takeDelimiter('\n');
         if (maybe_line == null) {
             return null;
         }
 
-        const line = std.mem.trimRight(u8, maybe_line.?, "\r");
+        const line = std.mem.trimEnd(u8, maybe_line.?, "\r");
         if (line.len != 0) {
             return line;
         }
@@ -127,27 +132,27 @@ fn parseContentLength(line: []const u8) !usize {
     return std.fmt.parseInt(usize, length_text, 10);
 }
 
-fn consumeHeaders(reader: anytype, line_buf: []u8) !void {
+fn consumeHeaders(reader: *std.Io.Reader) !void {
     while (true) {
-        const maybe_header = try reader.readUntilDelimiterOrEof(line_buf, '\n');
+        const maybe_header = try reader.takeDelimiter('\n');
         if (maybe_header == null) {
             return error.UnexpectedEof;
         }
 
-        const header = std.mem.trimRight(u8, maybe_header.?, "\r");
+        const header = std.mem.trimEnd(u8, maybe_header.?, "\r");
         if (header.len == 0) {
             return;
         }
     }
 }
 
-fn readPayloadBytes(allocator: std.mem.Allocator, reader: anytype, content_length: usize) ![]u8 {
+fn readPayloadBytes(allocator: std.mem.Allocator, reader: *std.Io.Reader, content_length: usize) ![]u8 {
     if (content_length > max_content_length_bytes) {
         return error.PayloadTooLarge;
     }
     const payload = try allocator.alloc(u8, content_length);
     errdefer allocator.free(payload);
-    try reader.readNoEof(payload);
+    try reader.readSliceAll(payload);
     return payload;
 }
 
@@ -439,13 +444,13 @@ fn validateAnalyzeFolderPath(
     folder_path: []const u8,
     config_path: ?[]const u8,
 ) !void {
-    const absolute_folder = try std.fs.realpathAlloc(allocator, folder_path);
+    const absolute_folder = try compat.realpathAlloc(allocator, folder_path);
     defer allocator.free(absolute_folder);
 
     var loaded_cfg = try guardian_config.loadForTarget(allocator, absolute_folder, config_path);
     defer loaded_cfg.deinit();
 
-    const cwd_root = try std.fs.realpathAlloc(allocator, ".");
+    const cwd_root = try compat.realpathAlloc(allocator, ".");
     defer allocator.free(cwd_root);
 
     if (isPathWithinRoot(absolute_folder, cwd_root) or isPathWithinRoot(absolute_folder, loaded_cfg.value.root_path)) {
@@ -689,25 +694,19 @@ test "protocol: analyze_folder scans supported files recursively" {
     const config_json = try test_config.stringify(testing.allocator, loaded_default.value);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
-        .data = config_json,
-    });
-    try tmp.dir.makePath("pkg/nested");
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg/nested/main.go",
-        .data =
+    try compat.dirWriteFile(tmp.dir, "guardian.config.json", config_json);
+    try compat.dirMakePath(tmp.dir, "pkg/nested");
+    try compat.dirWriteFile(
+        tmp.dir,
+        "pkg/nested/main.go",
         \\func Process(data interface{}) {
         \\    _ = data
         \\}
         ,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg/nested/notes.txt",
-        .data = "ignore me\n",
-    });
+    );
+    try compat.dirWriteFile(tmp.dir, "pkg/nested/notes.txt", "ignore me\n");
 
-    const absolute_folder = try tmp.dir.realpathAlloc(testing.allocator, "pkg");
+    const absolute_folder = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "pkg");
     defer testing.allocator.free(absolute_folder);
 
     const request = try buildAnalyzeFolderRequest(testing.allocator, absolute_folder);
@@ -726,24 +725,23 @@ test "protocol: analyze_folder scans supported files recursively" {
 }
 
 test "protocol: analyze_folder rejects paths outside cwd and config root" {
+    var marker: u8 = 0;
     const tmp_root = try std.fmt.allocPrint(
         testing.allocator,
-        "/tmp/guardian-server-{d}",
-        .{std.time.microTimestamp()},
+        "/tmp/guardian-server-{x}",
+        .{@intFromPtr(&marker)},
     );
     defer testing.allocator.free(tmp_root);
-    defer std.fs.deleteTreeAbsolute(tmp_root) catch {};
+    compat.deleteTreeAbsolute(tmp_root) catch {};
+    defer compat.deleteTreeAbsolute(tmp_root) catch {};
 
-    try std.fs.makeDirAbsolute(tmp_root);
+    try compat.makeDirAbsolute(tmp_root);
     const tmp_pkg = try std.fs.path.join(testing.allocator, &.{ tmp_root, "pkg" });
     defer testing.allocator.free(tmp_pkg);
-    try std.fs.makeDirAbsolute(tmp_pkg);
-
+    try compat.makeDirAbsolute(tmp_pkg);
     const file_path = try std.fs.path.join(testing.allocator, &.{ tmp_pkg, "main.go" });
     defer testing.allocator.free(file_path);
-    const file = try std.fs.createFileAbsolute(file_path, .{});
-    defer file.close();
-    try file.writeAll("package main\n");
+    try compat.writeFileAbsolute(file_path, "package main\n");
 
     const request = try buildAnalyzeFolderRequest(testing.allocator, tmp_pkg);
     defer testing.allocator.free(request);
@@ -770,31 +768,28 @@ test "protocol: analyze_folder supports explicit absolute config path via tools/
     const config_json = try test_config.stringify(testing.allocator, cfg);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
-        .data = config_json,
-    });
-    try tmp.dir.makePath("pkg/nested");
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg/nested/a.go",
-        .data =
+    try compat.dirWriteFile(tmp.dir, "guardian.config.json", config_json);
+    try compat.dirMakePath(tmp.dir, "pkg/nested");
+    try compat.dirWriteFile(
+        tmp.dir,
+        "pkg/nested/a.go",
         \\func Map[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg/nested/b.go",
-        .data =
+    );
+    try compat.dirWriteFile(
+        tmp.dir,
+        "pkg/nested/b.go",
         \\func Reduce[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
+    );
 
-    const absolute_folder = try tmp.dir.realpathAlloc(testing.allocator, "pkg");
+    const absolute_folder = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "pkg");
     defer testing.allocator.free(absolute_folder);
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
 
     const request = try buildAnalyzeFolderToolCallRequest(
@@ -851,8 +846,9 @@ test "protocol: rejects oversized framed payloads before allocation" {
 }
 
 fn buildAnalyzeFolderRequest(allocator: std.mem.Allocator, folder_path: []const u8) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writer.writeAll("{\"jsonrpc\":\"2.0\",");
     try writer.writeAll("\"id\":\"folder-1\",");
@@ -868,8 +864,9 @@ fn buildAnalyzeFolderToolCallRequest(
     folder_path: []const u8,
     config_path: []const u8,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writer.writeAll("{\"jsonrpc\":\"2.0\",");
     try writer.writeAll("\"id\":\"folder-tool-1\",");

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const config_schema = @import("config_schema.zig");
 const yaml_config = @import("yaml_config.zig");
 
@@ -56,7 +57,7 @@ pub fn resolveCacheKey(
 const max_config_bytes = 1024 * 1024;
 
 fn resolveExplicitConfigPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-    return try std.fs.realpathAlloc(allocator, path);
+    return try compat.realpathAlloc(allocator, path);
 }
 
 fn discoverConfigPath(allocator: std.mem.Allocator, target_path: ?[]const u8) !?[]const u8 {
@@ -78,7 +79,7 @@ fn discoverConfigPath(allocator: std.mem.Allocator, target_path: ?[]const u8) !?
 }
 
 fn resolveSearchRoot(allocator: std.mem.Allocator, start_dir: []const u8) ![]const u8 {
-    return std.fs.realpathAlloc(allocator, start_dir) catch try std.fs.realpathAlloc(allocator, ".");
+    return compat.realpathAlloc(allocator, start_dir) catch try compat.realpathAlloc(allocator, ".");
 }
 
 fn discoverConfigNearExecutable(
@@ -86,7 +87,7 @@ fn discoverConfigNearExecutable(
     target_root: []const u8,
     cwd_root: []const u8,
 ) !?[]const u8 {
-    const exe_path = std.fs.selfExePathAlloc(allocator) catch return null;
+    const exe_path = compat.executablePathAlloc(allocator) catch return null;
     defer allocator.free(exe_path);
 
     const exe_dir = std.fs.path.dirname(exe_path) orelse return null;
@@ -148,7 +149,7 @@ fn findNamedConfigInDir(
     name: []const u8,
 ) !?[]const u8 {
     const candidate = try std.fs.path.join(allocator, &.{ dir_path, name });
-    if (std.fs.accessAbsolute(candidate, .{})) |_| {
+    if (compat.accessAbsolute(candidate, .{})) |_| {
         return candidate;
     } else |err| switch (err) {
         error.FileNotFound => allocator.free(candidate),
@@ -165,9 +166,7 @@ fn readFileAllocAbsolute(
     absolute_path: []const u8,
     max_bytes: usize,
 ) ![]u8 {
-    const file = try std.fs.openFileAbsolute(absolute_path, .{});
-    defer file.close();
-    return file.readToEndAlloc(allocator, max_bytes);
+    return compat.readFileAllocAbsolute(allocator, absolute_path, max_bytes);
 }
 
 fn parseConfigBytes(
@@ -187,7 +186,7 @@ fn shouldParseJson(path: []const u8, bytes: []const u8) bool {
     if (std.mem.eql(u8, std.fs.path.extension(path), ".json")) {
         return true;
     }
-    const trimmed = std.mem.trimLeft(u8, bytes, " \t\r\n");
+    const trimmed = std.mem.trimStart(u8, bytes, " \t\r\n");
     return trimmed.len > 0 and trimmed[0] == '{';
 }
 
@@ -211,7 +210,7 @@ test "config loader: loads overrides from discovered file" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makePath("pkg");
+    try compat.dirMakePath(tmp.dir, "pkg");
     var loaded_default = try test_config.loadDefault(testing.allocator);
     defer loaded_default.deinit();
 
@@ -224,16 +223,10 @@ test "config loader: loads overrides from discovered file" {
     const config_json = try test_config.stringify(testing.allocator, cfg);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = legacy_config_name,
-        .data = config_json,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "pkg/main.go",
-        .data = "package main\n",
-    });
+    try compat.dirWriteFile(tmp.dir, legacy_config_name, config_json);
+    try compat.dirWriteFile(tmp.dir, "pkg/main.go", "package main\n");
 
-    const absolute_file = try tmp.dir.realpathAlloc(testing.allocator, "pkg/main.go");
+    const absolute_file = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "pkg/main.go");
     defer testing.allocator.free(absolute_file);
 
     var loaded = try loadForTarget(testing.allocator, absolute_file, null);
@@ -265,12 +258,9 @@ test "config loader: resolve cache key duplicates explicit absolute config path"
     const config_json = try test_config.stringify(testing.allocator, loaded_default.value);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = legacy_config_name,
-        .data = config_json,
-    });
+    try compat.dirWriteFile(tmp.dir, legacy_config_name, config_json);
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, legacy_config_name);
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, legacy_config_name);
     defer testing.allocator.free(absolute_config);
 
     const key = try resolveCacheKey(testing.allocator, null, absolute_config);
@@ -284,9 +274,9 @@ test "config loader: rejects unknown fields" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.writeFile(.{
-        .sub_path = legacy_config_name,
-        .data =
+    try compat.dirWriteFile(
+        tmp.dir,
+        legacy_config_name,
         \\{
         \\  "limits": {
         \\    "max_nesting": 3,
@@ -344,9 +334,9 @@ test "config loader: rejects unknown fields" {
         \\  }
         \\}
         ,
-    });
+    );
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, legacy_config_name);
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, legacy_config_name);
     defer testing.allocator.free(absolute_config);
 
     try testing.expectError(error.UnknownField, loadForTarget(testing.allocator, null, absolute_config));
@@ -356,9 +346,9 @@ test "config loader: rejects unknown fields from yaml" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.writeFile(.{
-        .sub_path = default_config_name,
-        .data =
+    try compat.dirWriteFile(
+        tmp.dir,
+        default_config_name,
         \\limits:
         \\  max_nesting: 3
         \\  cyclomatic_complexity_warn: 6
@@ -408,9 +398,9 @@ test "config loader: rejects unknown fields from yaml" {
         \\  anytype_scope: "public_only"
         \\  extra_banned_patterns: []
         ,
-    });
+    );
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, default_config_name);
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, default_config_name);
     defer testing.allocator.free(absolute_config);
 
     try testing.expectError(error.UnknownField, loadForTarget(testing.allocator, null, absolute_config));

@@ -49,8 +49,9 @@ fn renderResultText(
     result: AnalysisResult,
     mode: TextMode,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writeResultHeader(writer, result, mode);
 
@@ -74,8 +75,9 @@ fn renderBatchText(
     batch: BatchView,
     mode: TextMode,
 ) ![]u8 {
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writeBatchHeader(writer, batch, mode);
 
@@ -281,7 +283,7 @@ fn writeExcerpt(writer: anytype, violation: types.Violation, mode: TextMode) !vo
         try writer.print("  {s}code:{s}\n", .{ ansi.gray, ansi.reset });
     }
 
-    const excerpt = std.mem.trimRight(u8, violation.excerpt, "\n");
+    const excerpt = std.mem.trimEnd(u8, violation.excerpt, "\n");
     if (excerpt.len == 0) {
         return;
     }
@@ -332,7 +334,7 @@ fn writeExcerptLine(
 fn writePaddedLineNumber(writer: anytype, line_no: u32, width: usize) !void {
     const digits = lineNumberWidth(line_no);
     if (width > digits) {
-        try writer.writeByteNTimes(' ', width - digits);
+        try writer.splatByteAll(' ', width - digits);
     }
     try writer.print("{d}", .{line_no});
 }

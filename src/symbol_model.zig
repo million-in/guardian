@@ -206,7 +206,7 @@ fn buildGoModel(
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
 
         if (std.mem.startsWith(u8, trimmed, "type ") and std.mem.indexOf(u8, trimmed, "struct") != null) {
             const block = try collectBraceBlock(allocator, masked_lines, idx);
@@ -280,7 +280,7 @@ fn buildTypeScriptModel(
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
 
         if (looksLikeTsClassDecl(trimmed)) {
             const block = try collectBraceBlock(allocator, masked_lines, idx);
@@ -400,7 +400,7 @@ fn buildPythonModel(
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
 
         if (std.mem.startsWith(u8, trimmed, "class ")) {
             const class_end = findPythonBlockEnd(masked_lines, idx);
@@ -484,7 +484,7 @@ fn buildZigModel(
 
     var idx: usize = 0;
     while (idx < masked_lines.len) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
 
         if (looksLikeZigStructDecl(trimmed)) {
             const block = try collectBraceBlock(allocator, masked_lines, idx);
@@ -575,7 +575,7 @@ fn parseGoFunctionSignature(allocator: std.mem.Allocator, signature: []const u8)
         return .{ .name = "", .argument_count = 0, .is_public = false };
     }
 
-    var rest = std.mem.trimLeft(u8, signature["func ".len..], " \t");
+    var rest = std.mem.trimStart(u8, signature["func ".len..], " \t");
     var receiver_name: []const u8 = "";
     var owner_type: []const u8 = "";
 
@@ -584,7 +584,7 @@ fn parseGoFunctionSignature(allocator: std.mem.Allocator, signature: []const u8)
         const receiver_segment = std.mem.trim(u8, rest[1..receiver_end], " \t");
         receiver_name = firstIdentifier(receiver_segment);
         owner_type = lastTypeIdentifier(receiver_segment);
-        rest = std.mem.trimLeft(u8, rest[receiver_end + 1 ..], " \t");
+        rest = std.mem.trimStart(u8, rest[receiver_end + 1 ..], " \t");
     }
 
     const name = firstIdentifier(rest);
@@ -774,7 +774,7 @@ fn scanGoStructFields(
     var depth: i32 = 0;
     var idx = start_idx;
     while (idx < end_idx) : (idx += 1) {
-        const trimmed = std.mem.trimLeft(u8, lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, lines[idx], " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -805,7 +805,7 @@ fn scanTypeScriptClass(
 ) !void {
     var idx = start_idx;
     while (idx < end_idx) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
         if (trimmed.len == 0) {
             idx += 1;
             continue;
@@ -870,7 +870,7 @@ fn scanTypeScriptShapeFields(
 ) !void {
     var idx = start_idx;
     while (idx < end_idx) : (idx += 1) {
-        const trimmed = std.mem.trimLeft(u8, lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, lines[idx], " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -903,7 +903,7 @@ fn scanPythonClass(
     const class_indent = types.leadingWhitespace(masked_lines[class_idx]);
     var idx = class_idx + 1;
     while (idx <= class_end) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
         const ws = types.leadingWhitespace(masked_lines[idx]);
         if (trimmed.len == 0 or ws <= class_indent) {
             idx += 1;
@@ -1003,7 +1003,7 @@ fn scanZigStruct(
 ) !void {
     var idx = start_idx;
     while (idx < end_idx) {
-        const trimmed = std.mem.trimLeft(u8, masked_lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
         if (trimmed.len == 0) {
             idx += 1;
             continue;
@@ -1076,7 +1076,7 @@ fn analyzeGoBody(
     var idx = start_idx;
     while (idx < end_idx and idx < lines.len) : (idx += 1) {
         const line = lines[idx];
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -1108,7 +1108,7 @@ fn analyzeTypeScriptBody(
     var idx = start_idx;
     while (idx < end_idx and idx < lines.len) : (idx += 1) {
         const line = lines[idx];
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -1136,7 +1136,7 @@ fn analyzePythonBody(
     var idx = start_idx;
     while (idx < end_idx and idx < lines.len) : (idx += 1) {
         const line = lines[idx];
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -1171,7 +1171,7 @@ fn analyzeZigBody(
     var idx = start_idx;
     while (idx < end_idx and idx < lines.len) : (idx += 1) {
         const line = lines[idx];
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -1211,8 +1211,8 @@ fn collectGoScopeNames(
     var in_import_block = false;
 
     for (raw_lines, masked_lines) |raw_line, masked_line| {
-        const raw_trimmed = std.mem.trimLeft(u8, raw_line, " \t");
-        const masked_trimmed = std.mem.trimLeft(u8, masked_line, " \t");
+        const raw_trimmed = std.mem.trimStart(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimStart(u8, masked_line, " \t");
 
         if (depth == 0) {
             if (in_import_block) {
@@ -1253,8 +1253,8 @@ fn collectTypeScriptScopeNames(
     var in_named_import_block = false;
 
     for (raw_lines, masked_lines) |raw_line, masked_line| {
-        const raw_trimmed = std.mem.trimLeft(u8, raw_line, " \t");
-        const masked_trimmed = std.mem.trimLeft(u8, masked_line, " \t");
+        const raw_trimmed = std.mem.trimStart(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimStart(u8, masked_line, " \t");
 
         if (depth == 0) {
             if (in_named_import_block) {
@@ -1296,7 +1296,7 @@ fn collectPythonScopeNames(
             continue;
         }
 
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -1336,8 +1336,8 @@ fn collectZigScopeNames(
     var depth: i32 = 0;
 
     for (raw_lines, masked_lines) |raw_line, masked_line| {
-        const raw_trimmed = std.mem.trimLeft(u8, raw_line, " \t");
-        const masked_trimmed = std.mem.trimLeft(u8, masked_line, " \t");
+        const raw_trimmed = std.mem.trimStart(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimStart(u8, masked_line, " \t");
 
         if (depth == 0) {
             if (startsWithAny(masked_trimmed, &[_][]const u8{ "const ", "var ", "pub const ", "pub var " })) {
@@ -1574,7 +1574,7 @@ fn appendPythonDeclarations(list: *std.array_list.Managed([]const u8), line: []c
 
     if (std.mem.startsWith(u8, line, "except ") or std.mem.startsWith(u8, line, "except:")) {
         if (std.mem.indexOf(u8, line, " as ")) |pos| {
-            const name = std.mem.trimRight(u8, line[pos + " as ".len ..], ":");
+            const name = std.mem.trimEnd(u8, line[pos + " as ".len ..], ":");
             try addUniqueString(list, name);
         }
     }
@@ -1670,7 +1670,7 @@ fn appendTypeScriptImportBindings(
 ) !void {
     var text = std.mem.trim(u8, masked_line["import ".len..], " \t;");
     if (std.mem.startsWith(u8, text, "type ")) {
-        text = std.mem.trimLeft(u8, text["type ".len..], " \t");
+        text = std.mem.trimStart(u8, text["type ".len..], " \t");
     }
 
     if (std.mem.startsWith(u8, text, "* as ")) {
@@ -1709,7 +1709,7 @@ fn appendTypeScriptNamedImportItems(list: *std.array_list.Managed([]const u8), t
             continue;
         }
         if (std.mem.startsWith(u8, trimmed, "type ")) {
-            trimmed = std.mem.trimLeft(u8, trimmed["type ".len..], " \t");
+            trimmed = std.mem.trimStart(u8, trimmed["type ".len..], " \t");
         }
         if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
             try addUniqueString(list, firstIdentifier(trimmed[as_pos + " as ".len ..]));
@@ -1747,7 +1747,7 @@ fn appendPythonFromImportNames(list: *std.array_list.Managed([]const u8), text: 
 }
 
 fn appendPythonWithBindings(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
-    const segments = try topLevelSegments(list.allocator, std.mem.trimRight(u8, text, ":"));
+    const segments = try topLevelSegments(list.allocator, std.mem.trimEnd(u8, text, ":"));
     for (segments) |segment| {
         const trimmed = std.mem.trim(u8, segment, " \t");
         if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
@@ -1789,7 +1789,7 @@ fn extractGoImportName(text: []const u8) ?[]const u8 {
         return null;
     }
     if (std.mem.startsWith(u8, trimmed, "import ")) {
-        trimmed = std.mem.trimLeft(u8, trimmed["import ".len..], " \t");
+        trimmed = std.mem.trimStart(u8, trimmed["import ".len..], " \t");
     }
     if (trimmed.len == 0) {
         return null;
@@ -1831,10 +1831,10 @@ fn extractGoScopeFunctionName(text: []const u8) []const u8 {
         return "";
     }
 
-    var after = std.mem.trimLeft(u8, text["func ".len..], " \t");
+    var after = std.mem.trimStart(u8, text["func ".len..], " \t");
     if (after.len > 0 and after[0] == '(') {
         const close = findMatchingForward(after, 0, '(', ')') orelse return "";
-        after = std.mem.trimLeft(u8, after[close + 1 ..], " \t");
+        after = std.mem.trimStart(u8, after[close + 1 ..], " \t");
     }
     return firstIdentifier(after);
 }
@@ -1912,7 +1912,7 @@ fn parseTypeScriptParamNames(
             continue;
         }
         if (std.mem.startsWith(u8, trimmed, "...")) {
-            trimmed = std.mem.trimLeft(u8, trimmed["...".len..], " \t");
+            trimmed = std.mem.trimStart(u8, trimmed["...".len..], " \t");
         }
         const name = firstIdentifier(trimmed);
         if (name.len == 0 or (is_method and idx == 0 and std.mem.eql(u8, name, "this"))) {
@@ -2030,7 +2030,7 @@ fn findPythonBlockEnd(lines: []const []const u8, start_idx: usize) usize {
     var idx = start_idx + 1;
     var last = start_idx;
     while (idx < lines.len) : (idx += 1) {
-        const trimmed = std.mem.trimLeft(u8, lines[idx], " \t");
+        const trimmed = std.mem.trimStart(u8, lines[idx], " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -2121,7 +2121,7 @@ fn extractTsMethodName(text: []const u8) []const u8 {
     var trimmed = std.mem.trim(u8, text, " \t");
     inline for (&[_][]const u8{ "public ", "private ", "protected ", "static ", "async ", "readonly ", "get ", "set " }) |prefix| {
         if (std.mem.startsWith(u8, trimmed, prefix)) {
-            trimmed = std.mem.trimLeft(u8, trimmed[prefix.len..], " \t");
+            trimmed = std.mem.trimStart(u8, trimmed[prefix.len..], " \t");
         }
     }
     if (trimmed.len > 0 and trimmed[0] == '#') {
@@ -2137,7 +2137,7 @@ fn extractTsClassFieldName(trimmed: []const u8) []const u8 {
     var text = trimmed;
     inline for (&[_][]const u8{ "public ", "private ", "protected ", "readonly ", "static ", "declare " }) |prefix| {
         if (std.mem.startsWith(u8, text, prefix)) {
-            text = std.mem.trimLeft(u8, text[prefix.len..], " \t");
+            text = std.mem.trimStart(u8, text[prefix.len..], " \t");
         }
     }
     if (text.len > 0 and text[0] == '#') {

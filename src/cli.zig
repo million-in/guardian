@@ -1,6 +1,7 @@
 const std = @import("std");
 const analyzer = @import("analyzer.zig");
 const app = @import("app.zig");
+const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
 const server = @import("server.zig");
 
@@ -19,17 +20,21 @@ const Command = enum {
 };
 
 pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
-    const stdout_file = std.fs.File.stdout();
-    const stdout = stdout_file.deprecatedWriter();
-    const stderr = std.fs.File.stderr().deprecatedWriter();
+    const stdout_file = std.Io.File.stdout();
+    var stdout_buffer: [16 * 1024]u8 = undefined;
+    var stderr_buffer: [16 * 1024]u8 = undefined;
+    var stdout = stdout_file.writerStreaming(compat.io, &stdout_buffer);
+    var stderr = std.Io.File.stderr().writerStreaming(compat.io, &stderr_buffer);
+    defer stdout.interface.flush() catch {};
+    defer stderr.interface.flush() catch {};
     const command = parseCommand(args[0]) orelse {
-        try writeUsage(stderr);
+        try writeUsage(&stderr.interface);
         return error.InvalidArguments;
     };
 
     switch (command) {
         .serve => return server.run(allocator),
-        .help => return writeUsage(stdout),
+        .help => return writeUsage(&stdout.interface),
         .analyze, .batch, .folder => {},
     }
 
@@ -39,9 +44,9 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
     const output_mode = resolveOutputMode(stdout_file, parsed.options);
 
     switch (command) {
-        .analyze => try runAnalyzeCommand(allocator, stdout, stderr, parsed, output_mode),
-        .batch => try runBatchCommand(allocator, stdout, stderr, parsed, output_mode),
-        .folder => try runFolderCommand(allocator, stdout, stderr, parsed, output_mode),
+        .analyze => try runAnalyzeCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
+        .batch => try runBatchCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
+        .folder => try runFolderCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .serve, .help => unreachable,
     }
 }
@@ -64,18 +69,21 @@ fn writeUsage(writer: anytype) !void {
 }
 
 pub fn writeCliError(err: anyerror) !void {
-    const stderr = std.fs.File.stderr().deprecatedWriter();
+    var stderr_buffer: [16 * 1024]u8 = undefined;
+    var stderr = std.Io.File.stderr().writerStreaming(compat.io, &stderr_buffer);
+    defer stderr.interface.flush() catch {};
+    const writer = &stderr.interface;
 
     switch (err) {
         error.InvalidArguments => {},
-        error.UnsupportedFileExtension => try stderr.writeAll(
+        error.UnsupportedFileExtension => try writer.writeAll(
             "error: unsupported file extension for analyze/batch input\n",
         ),
-        error.FileNotFound => try stderr.writeAll("error: file or config path not found\n"),
-        error.InvalidInput => try stderr.writeAll("error: invalid input path\n"),
-        error.NotDirectory => try stderr.writeAll("error: folder command expects a directory path\n"),
-        error.NoSupportedSourceFiles => try stderr.writeAll("error: folder does not contain supported source files\n"),
-        else => try stderr.print("error: {}\n", .{err}),
+        error.FileNotFound => try writer.writeAll("error: file or config path not found\n"),
+        error.InvalidInput => try writer.writeAll("error: invalid input path\n"),
+        error.NotDirectory => try writer.writeAll("error: folder command expects a directory path\n"),
+        error.NoSupportedSourceFiles => try writer.writeAll("error: folder does not contain supported source files\n"),
+        else => try writer.print("error: {}\n", .{err}),
     }
 }
 
@@ -168,11 +176,11 @@ fn writeOutput(writer: anytype, output: []const u8, mode: OutputMode) !void {
     }
 }
 
-fn resolveOutputMode(stdout_file: std.fs.File, options: CliOptions) OutputMode {
+fn resolveOutputMode(stdout_file: std.Io.File, options: CliOptions) OutputMode {
     if (options.raw_json_output) {
         return .json;
     }
-    if (options.json_output and !stdout_file.isTty()) {
+    if (options.json_output and !(stdout_file.isTty(compat.io) catch false)) {
         return .json;
     }
     return .pretty;

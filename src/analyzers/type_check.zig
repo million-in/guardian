@@ -55,7 +55,7 @@ fn analyzeGoTypes(
 
     for (masked_lines, 0..) |line, line_idx| {
         const line_no = @as(u32, @intCast(line_idx)) + 1;
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         const starts_signature = std.mem.startsWith(u8, trimmed, "func ");
         const starts_struct = std.mem.startsWith(u8, trimmed, "type ") and
             std.mem.indexOf(u8, trimmed, "struct") != null;
@@ -301,7 +301,7 @@ fn analyzePythonTypes(
 
     for (masked_lines, 0..) |line, line_idx| {
         const line_no = @as(u32, @intCast(line_idx)) + 1;
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) {
             continue;
         }
@@ -345,7 +345,7 @@ fn analyzeZigTypes(
 
     for (masked_lines, 0..) |line, line_idx| {
         const line_no = @as(u32, @intCast(line_idx)) + 1;
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         const is_function_line = std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "pub fn ") or
             std.mem.startsWith(u8, trimmed, "export fn ");
@@ -433,7 +433,7 @@ fn checkPythonFunctionAnnotations(
     var depth = PythonSignatureDepth{};
 
     for (masked_lines, 0..) |line, line_idx| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
 
         if (std.mem.startsWith(u8, trimmed, "def ") or
             std.mem.startsWith(u8, trimmed, "async def "))
@@ -591,7 +591,7 @@ fn checkGoTypeAssertions(
 ) !void {
     for (masked_lines, 0..) |line, line_idx| {
         const line_no = @as(u32, @intCast(line_idx)) + 1;
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
 
         if (cfg.go.warn_type_switch) {
             if (std.mem.indexOf(u8, line, ".(type)")) |col| {
@@ -839,14 +839,14 @@ fn extractGoFuncName(trimmed: []const u8) []const u8 {
         return "";
     }
 
-    var after = std.mem.trimLeft(u8, trimmed["func ".len..], " \t");
+    var after = std.mem.trimStart(u8, trimmed["func ".len..], " \t");
     if (after.len == 0) {
         return "";
     }
 
     if (after[0] == '(') {
         const receiver_end = findMatchingParen(after) orelse return "";
-        after = std.mem.trimLeft(u8, after[receiver_end + 1 ..], " \t");
+        after = std.mem.trimStart(u8, after[receiver_end + 1 ..], " \t");
     }
 
     const name_end = scanGoIdentifier(after);
@@ -862,7 +862,7 @@ fn extractGoTypeName(trimmed: []const u8) []const u8 {
         return "";
     }
 
-    const after = std.mem.trimLeft(u8, trimmed["type ".len..], " \t");
+    const after = std.mem.trimStart(u8, trimmed["type ".len..], " \t");
     const name_end = scanGoIdentifier(after);
     if (name_end == 0) {
         return "";
@@ -873,14 +873,14 @@ fn extractGoTypeName(trimmed: []const u8) []const u8 {
 
 fn isGoGenericDeclaration(trimmed: []const u8) bool {
     if (std.mem.startsWith(u8, trimmed, "func ")) {
-        var after = std.mem.trimLeft(u8, trimmed["func ".len..], " \t");
+        var after = std.mem.trimStart(u8, trimmed["func ".len..], " \t");
         if (after.len == 0) {
             return false;
         }
 
         if (after[0] == '(') {
             const receiver_end = findMatchingParen(after) orelse return false;
-            after = std.mem.trimLeft(u8, after[receiver_end + 1 ..], " \t");
+            after = std.mem.trimStart(u8, after[receiver_end + 1 ..], " \t");
         }
 
         const name_end = scanGoIdentifier(after);
@@ -888,7 +888,7 @@ fn isGoGenericDeclaration(trimmed: []const u8) bool {
     }
 
     if (std.mem.startsWith(u8, trimmed, "type ")) {
-        const after = std.mem.trimLeft(u8, trimmed["type ".len..], " \t");
+        const after = std.mem.trimStart(u8, trimmed["type ".len..], " \t");
         const name_end = scanGoIdentifier(after);
         return name_end > 0 and name_end < after.len and after[name_end] == '[';
     }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
 const test_config = @import("test_config.zig");
 
@@ -67,32 +68,29 @@ test "config resolver: explicit absolute config path can be reused across files"
     const config_json = try test_config.stringify(testing.allocator, cfg);
     defer testing.allocator.free(config_json);
 
-    try tmp.dir.writeFile(.{
-        .sub_path = "guardian.config.json",
-        .data = config_json,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "a.go",
-        .data =
+    try compat.dirWriteFile(tmp.dir, "guardian.config.json", config_json);
+    try compat.dirWriteFile(
+        tmp.dir,
+        "a.go",
         \\func Map[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
-    try tmp.dir.writeFile(.{
-        .sub_path = "b.go",
-        .data =
+    );
+    try compat.dirWriteFile(
+        tmp.dir,
+        "b.go",
         \\func Reduce[T any](items []T) []T {
         \\    return items
         \\}
         ,
-    });
+    );
 
-    const absolute_config = try tmp.dir.realpathAlloc(testing.allocator, "guardian.config.json");
+    const absolute_config = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "guardian.config.json");
     defer testing.allocator.free(absolute_config);
-    const file_a = try tmp.dir.realpathAlloc(testing.allocator, "a.go");
+    const file_a = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "a.go");
     defer testing.allocator.free(file_a);
-    const file_b = try tmp.dir.realpathAlloc(testing.allocator, "b.go");
+    const file_b = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, "b.go");
     defer testing.allocator.free(file_b);
 
     var resolver = Resolver.init(testing.allocator, absolute_config);

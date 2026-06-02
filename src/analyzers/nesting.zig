@@ -113,7 +113,7 @@ pub fn analyzePythonNesting(
     var max_depth_line: u32 = 0;
 
     for (lines, 0..) |line, line_idx| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (trimmed.len == 0) continue;
 
         const ws = types.leadingWhitespace(line);
