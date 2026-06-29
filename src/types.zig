@@ -4,12 +4,14 @@ pub const Language = enum {
     go,
     typescript,
     python,
+    rust,
     zig_lang,
 
     pub fn fromExtension(ext: []const u8) ?Language {
         if (std.mem.eql(u8, ext, ".go")) return .go;
         if (std.mem.eql(u8, ext, ".ts") or std.mem.eql(u8, ext, ".tsx")) return .typescript;
         if (std.mem.eql(u8, ext, ".py")) return .python;
+        if (std.mem.eql(u8, ext, ".rs")) return .rust;
         if (std.mem.eql(u8, ext, ".zig")) return .zig_lang;
         return null;
     }
@@ -102,6 +104,202 @@ pub fn freeViolations(allocator: std.mem.Allocator, violations: []Violation) voi
     allocator.free(violations);
 }
 
+fn maskRustSource(source: []const u8, masked: []u8) void {
+    const Mode = enum {
+        code,
+        line_comment,
+        block_comment,
+        double_quote,
+        char_quote,
+        raw_string,
+    };
+
+    var mode: Mode = .code;
+    var escaped = false;
+    var block_depth: u32 = 0;
+    var raw_hashes: u32 = 0;
+    var i: usize = 0;
+
+    while (i < source.len) : (i += 1) {
+        const ch = source[i];
+
+        switch (mode) {
+            .line_comment => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                } else {
+                    mode = .code;
+                }
+            },
+            .block_comment => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (ch == '/' and i + 1 < source.len and source[i + 1] == '*') {
+                    masked[i + 1] = ' ';
+                    block_depth += 1;
+                    i += 1;
+                    continue;
+                }
+                if (ch == '*' and i + 1 < source.len and source[i + 1] == '/') {
+                    masked[i + 1] = ' ';
+                    i += 1;
+                    block_depth -= 1;
+                    if (block_depth == 0) {
+                        mode = .code;
+                    }
+                }
+            },
+            .double_quote => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '"' or ch == '\n') {
+                    mode = .code;
+                }
+            },
+            .char_quote => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '\'' or ch == '\n') {
+                    mode = .code;
+                }
+            },
+            .raw_string => {
+                if (ch != '\n') {
+                    masked[i] = ' ';
+                }
+                if (ch == '"' and rustRawStringEnd(source, i, raw_hashes)) {
+                    var hash_idx: usize = 0;
+                    while (hash_idx < raw_hashes) : (hash_idx += 1) {
+                        masked[i + 1 + hash_idx] = ' ';
+                    }
+                    i += raw_hashes;
+                    mode = .code;
+                }
+            },
+            .code => {
+                if (rustRawStringStart(source, i)) |start| {
+                    var mask_idx = i;
+                    while (mask_idx <= start.quote_idx) : (mask_idx += 1) {
+                        masked[mask_idx] = ' ';
+                    }
+                    raw_hashes = start.hash_count;
+                    i = start.quote_idx;
+                    mode = .raw_string;
+                    continue;
+                }
+
+                if (ch == '/' and i + 1 < source.len and source[i + 1] == '/') {
+                    masked[i] = ' ';
+                    masked[i + 1] = ' ';
+                    mode = .line_comment;
+                    i += 1;
+                    continue;
+                }
+
+                if (ch == '/' and i + 1 < source.len and source[i + 1] == '*') {
+                    masked[i] = ' ';
+                    masked[i + 1] = ' ';
+                    block_depth = 1;
+                    mode = .block_comment;
+                    i += 1;
+                    continue;
+                }
+
+                if (ch == '"') {
+                    masked[i] = ' ';
+                    escaped = false;
+                    mode = .double_quote;
+                    continue;
+                }
+
+                if (ch == '\'' and looksLikeRustCharLiteral(source, i)) {
+                    masked[i] = ' ';
+                    escaped = false;
+                    mode = .char_quote;
+                }
+            },
+        }
+    }
+}
+
+const RustRawStringStart = struct {
+    quote_idx: usize,
+    hash_count: u32,
+};
+
+fn rustRawStringStart(source: []const u8, idx: usize) ?RustRawStringStart {
+    var cursor = idx;
+    if (cursor < source.len and source[cursor] == 'b') {
+        cursor += 1;
+    }
+    if (cursor >= source.len or source[cursor] != 'r') {
+        return null;
+    }
+    cursor += 1;
+
+    var hashes: u32 = 0;
+    while (cursor < source.len and source[cursor] == '#') : (cursor += 1) {
+        hashes += 1;
+    }
+    if (cursor >= source.len or source[cursor] != '"') {
+        return null;
+    }
+    return .{ .quote_idx = cursor, .hash_count = hashes };
+}
+
+fn rustRawStringEnd(source: []const u8, quote_idx: usize, hashes: u32) bool {
+    var offset: usize = 0;
+    while (offset < hashes) : (offset += 1) {
+        const idx = quote_idx + 1 + offset;
+        if (idx >= source.len or source[idx] != '#') {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn looksLikeRustCharLiteral(source: []const u8, quote_idx: usize) bool {
+    var cursor = quote_idx + 1;
+    if (cursor >= source.len or source[cursor] == '\n' or source[cursor] == '\'') {
+        return false;
+    }
+    if (source[cursor] == '\\') {
+        cursor += 1;
+        if (cursor >= source.len or source[cursor] == '\n') {
+            return false;
+        }
+    }
+    cursor += 1;
+    while (cursor < source.len and cursor - quote_idx <= 12) : (cursor += 1) {
+        if (source[cursor] == '\'') {
+            return true;
+        }
+        if (source[cursor] == '\n' or source[cursor] == ' ' or source[cursor] == '\t') {
+            return false;
+        }
+    }
+    return false;
+}
+
 /// Splits source into lines. Caller owns returned slice (allocated from allocator).
 pub fn splitLines(allocator: std.mem.Allocator, source: []const u8) ![]const []const u8 {
     var lines = std.array_list.Managed([]const u8).init(allocator);
@@ -163,6 +361,7 @@ pub fn maskSource(
             .allow_single_quotes = true,
             .backtick_mode = .template,
         }),
+        .rust => maskRustSource(source, masked),
         .zig_lang => maskBraceStyleSource(source, masked, .{
             .allow_block_comments = false,
             .allow_single_quotes = true,
@@ -173,6 +372,35 @@ pub fn maskSource(
     }
 
     return masked;
+}
+
+pub fn writeJsonEscaped(writer: *std.Io.Writer, value: []const u8) !void {
+    for (value) |ch| {
+        try writeEscapedJsonByte(writer, ch);
+    }
+}
+
+fn writeEscapedJsonByte(writer: *std.Io.Writer, ch: u8) !void {
+    switch (ch) {
+        '"' => try writer.writeAll("\\\""),
+        '\\' => try writer.writeAll("\\\\"),
+        '\n' => try writer.writeAll("\\n"),
+        '\r' => try writer.writeAll("\\r"),
+        '\t' => try writer.writeAll("\\t"),
+        else => try writePrintableJsonByte(writer, ch),
+    }
+}
+
+fn writePrintableJsonByte(writer: *std.Io.Writer, ch: u8) !void {
+    if (ch >= 0x20) {
+        try writer.writeByte(ch);
+        return;
+    }
+
+    const hex = "0123456789abcdef";
+    try writer.writeAll("\\u00");
+    try writer.writeByte(hex[ch >> 4]);
+    try writer.writeByte(hex[ch & 0x0f]);
 }
 
 const BacktickMode = enum {
@@ -600,4 +828,22 @@ test "maskSource: TypeScript template expressions ignore braces inside nested st
     try testing.expect(masked[masked.len - 1] == ';');
     try testing.expect(std.mem.indexOf(u8, masked, "\"}\"") == null);
     try testing.expect(std.mem.indexOf(u8, masked, "foo") == null);
+}
+
+test "maskSource: Rust raw strings and comments are blanked without masking lifetimes" {
+    const src =
+        \\fn read<'a>(value: &'a str) {
+        \\    let text = r#"if broken { still string }"#;
+        \\    // unsafe unwrap()
+        \\    let ch = '{';
+        \\}
+    ;
+
+    const masked = try maskSource(testing.allocator, src, .rust);
+    defer testing.allocator.free(masked);
+
+    try testing.expect(std.mem.indexOf(u8, masked, "'a") != null);
+    try testing.expect(std.mem.indexOf(u8, masked, "broken") == null);
+    try testing.expect(std.mem.indexOf(u8, masked, "unsafe unwrap") == null);
+    try testing.expect(std.mem.indexOf(u8, masked, "'{'") == null);
 }

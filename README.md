@@ -1,13 +1,16 @@
 # Guardian
 
-A static analysis engine for enforcing engineering discipline across polyglot codebases. Written in Zig, Guardian ships as both a standalone CLI (`gd`) and an MCP (Model Context Protocol) server (`guardian-mcp`) that AI coding assistants can call to validate code before presenting it to the user.
+A fast static analysis engine for enforcing engineering discipline across polyglot codebases. Guardian is written in Zig and is intentionally exposed only through:
 
-Guardian analyzes **Go**, **TypeScript**, **Python**, and **Zig** source files against a configurable set of rules covering nesting depth, cyclomatic complexity, type safety, cohesion, and formatting.
-It also reports cross-language design smells such as oversized signatures, oversized state containers, hidden coupling, temporal coupling, boolean state machines, and ambiguous lifecycle ownership.
+- `gd` — the standalone CLI for single-file, batch, and folder scans
+- `libguardian` + `include/guardian.h` — the C ABI for host applications
+
+Guardian analyzes **Go**, **TypeScript**, **Python**, **Rust**, and **Zig** source files with configurable checks for nesting depth, cyclomatic complexity, type-safety footguns, cohesion, formatting, and cross-language design smells.
 
 ## Requirements
 
 - Zig `>= 0.16.0`
+- `jq` for shell end-to-end tests
 
 ## Build
 
@@ -15,91 +18,37 @@ It also reports cross-language design smells such as oversized signatures, overs
 zig build
 ```
 
-## Development Shell
+Artifacts:
 
-Use the Nix flake when you want the same toolchain locally and in CI:
+| Artifact | Purpose |
+|---|---|
+| `zig-out/bin/gd` | CLI for single-file, batch, and folder analysis |
+| `zig-out/lib/libguardian.*` | C ABI library for C, C++, Go/cgo, and other FFI callers |
+| `zig-out/include/guardian.h` | Header for the C ABI |
+
+Development shell:
 
 ```sh
 nix develop -c zig build ci
 ```
 
-This produces CLI/MCP binaries plus static and dynamic libraries:
-
-| Artifact | Purpose |
-|---|---|
-| `zig-out/bin/gd` | CLI for single-file, batch, and folder analysis |
-| `zig-out/bin/guardian-mcp` | MCP server communicating over stdin/stdout via JSON-RPC with Content-Length framing |
-| `zig-out/lib/libguardian.*` | C ABI library for C, C++, and Go/cgo callers |
-| `zig-out/include/guardian.h` | Header for the C ABI |
-
-## Install Options
-
-### Repo-Local Development Install
-
-- Build the binaries with `zig build`
-- Use `./zig-out/bin/gd` as the CLI
-- Use [.claude/settings.json](./.claude/settings.json) for a repo-local Claude Code MCP config, geez forgot to commit this template sorry)
-- Use [plugin.mcp.json](./plugin.mcp.json) when installing the Codex plugin locally so the plugin can register Guardian as an MCP server
-
-### Release Archive Install
-
-Tagged releases package a portable archive containing:
-
-- `bin/gd` and `bin/guardian-mcp`
-- `lib/libguardian.*` and `include/guardian.h`
-- `.mcp.json` for project-local MCP installs
-- `.claude/settings.json` for Claude Code
-- `.claude-plugin/` for Claude plugin installs
-- `.codex-plugin/` plus `plugin.mcp.json` for Codex plugin installs
-
-Create a release archive locally with:
-
-```sh
-bash ./scripts/package-release.sh
-```
-
 ## CLI Usage
 
-```
+```text
 gd analyze <file> [--json] [--raw-json] [--config path]
 gd batch <file> <file> [...] [--json] [--raw-json] [--config path]
 gd folder <dir> [--json] [--raw-json] [--config path]
-gd serve                          # start MCP server mode
 ```
 
-**Analyze a single file:**
+Examples:
 
 ```sh
-./zig-out/bin/gd analyze samples/go_bad.go
+./zig-out/bin/gd analyze samples/rs_bad.rs
+./zig-out/bin/gd batch samples/go_bad.go samples/rs_clean.rs --json | jq .
+./zig-out/bin/gd folder samples --raw-json | jq .
 ```
 
-**Batch analyze multiple files:**
-
-```sh
-./zig-out/bin/gd batch samples/go_bad.go samples/py_clean.py --json | jq .
-```
-
-**Recursively analyze a folder:**
-
-```sh
-./zig-out/bin/gd folder samples --json | jq .
-```
-
-On a terminal, `gd` shows human-readable ANSI-colored output by default, including when `--json` is present. When `--json` is piped, `gd` emits machine-readable JSON. Use `--raw-json` to force JSON directly in the terminal.
-
-## MCP Server
-
-When invoked with no arguments (or `gd serve`), Guardian runs as an MCP server over stdin/stdout using the [JSON-RPC 2.0](https://www.jsonrpc.org/specification) protocol with `Content-Length` header framing.
-
-### Exposed Tools
-
-| Tool | Description | Required Params |
-|---|---|---|
-| `analyze` | Analyze a single source file | `file_path`, `source` |
-| `analyze_batch` | Analyze multiple files in one request | `files` (array of `{file_path, source}`) |
-| `analyze_folder` | Recursively analyze a directory on disk | `path` |
-
-All tools accept optional `config_path` and `severity_filter` parameters. `severity_filter` accepts `all`, `errors_only`, `warnings_only`, or `clear_errors`. Tool-call responses return JSON text in the MCP content payload.
+On a terminal, `--json` keeps human-readable colored output; when piped, it emits machine-readable JSON. Use `--raw-json` to force JSON in a terminal.
 
 ## Library API
 
@@ -110,7 +59,7 @@ The Zig root module exposes JSON-returning helpers:
 - `analyzeBatchJson`
 - `analyzeFolderJson`
 
-The installed C ABI uses owned JSON strings:
+The installed C ABI returns owned JSON strings:
 
 ```c
 char *guardian_analyze_file_json(const char *file_path, const char *config_path, int severity_filter);
@@ -121,110 +70,59 @@ void guardian_free_string(char *value);
 
 Use `GUARDIAN_SEVERITY_ALL`, `GUARDIAN_SEVERITY_ERRORS_ONLY`, `GUARDIAN_SEVERITY_WARNINGS_ONLY`, or `GUARDIAN_SEVERITY_CLEAR_ERRORS` from `guardian.h`.
 
-### Integration with Claude Code
-
-Guardian works with Claude Code in two ways:
-
-Project-scoped Claude MCP config:
-
-```json
-{
-  "mcpServers": {
-    "guardian": {
-      "command": "./zig-out/bin/guardian-mcp",
-      "args": []
-    }
-  }
-}
-```
-
-Release archives ship that config in `.mcp.json`. In the repo, the tracked local-development equivalent is [plugin.mcp.json](./plugin.mcp.json).
-
-Per-project settings file:
-
-```json
-{
-  "mcpServers": {
-    "guardian": {
-      "command": "./zig-out/bin/guardian-mcp",
-      "args": []
-    }
-  }
-}
-```
-
-This repo also ships the same server in [.claude/settings.json](./.claude/settings.json) for repo-local development. Release archives rewrite that file to point at `./bin/guardian-mcp`.
-
-### Integration with Codex Plugins
-
-The Codex plugin manifest in [.codex-plugin/plugin.json](./.codex-plugin/plugin.json) points `mcpServers` at [plugin.mcp.json](./plugin.mcp.json), so local or marketplace plugin installs can register the Guardian MCP server alongside the skill.
-
-The companion skill definition in `skill/SKILL.md` instructs the agent to call the `analyze` tool on every code change and reject results containing `error`-severity violations.
-
-### Raw MCP Example
-
-```sh
-SRC=$(jq -Rs . < samples/go_bad.go)
-BODY=$(printf '{"jsonrpc":"2.0","id":1,"method":"analyze","params":{"file_path":"samples/go_bad.go","source":%s}}' "$SRC")
-LEN=$(printf '%s' "$BODY" | wc -c | tr -d ' ')
-printf 'Content-Length: %s\r\n\r\n%s' "$LEN" "$BODY" | ./zig-out/bin/guardian-mcp
-```
-
-A convenience script wraps this: `./scripts/guardian-check.sh analyze samples/go_bad.go | jq .`
-
 ## Analysis Rules
 
 ### Nesting Depth
 
-Tracks brace depth (Go, TypeScript, Zig) or indent level (Python) within each function. Reports `error` when any function exceeds `max_nesting` (default: 3).
+Tracks brace depth for Go, TypeScript, Rust, and Zig, and indentation depth for Python. Reports `error` when a function exceeds `max_nesting`.
 
 ### Cyclomatic Complexity
 
-Counts branching constructs per function: `if`, `else if`/`elif`, `case`, `for`, `while`, `&&`/`and`, `||`/`or`, `catch`/`except`, `orelse`, ternary `?`, and `switch` (Zig). Two thresholds:
-
-- `cyclomatic_complexity_warn` (default: 6) -- `warn` severity
-- `cyclomatic_complexity_error` (default: 8) -- `error` severity
+Counts branch constructs per function. Common constructs include `if`, `else if`/`elif`, loops, boolean operators, `case`/`match`, `catch`/`except`, Zig `orelse`, Rust `?`, and TypeScript ternaries.
 
 ### Type Safety
 
-Language-specific banned patterns:
+Language-specific defaults:
 
-| Language | Banned (error) | Warned |
-|---|---|---|
-| Go | `interface{}`, unchecked type assertions, generics (configurable) | type switches, `map[string]interface{}` |
-| TypeScript | `any`, `as any`, `@ts-ignore` | `@ts-expect-error` |
-| Python | `Any` annotation, `# type: ignore` | bare `dict`/`list`, missing return annotation, `from typing import Any` |
-| Zig | -- | `anytype` in public signatures, `@ptrCast`, `@intCast` |
+| Language | Banned or warned patterns |
+|---|---|
+| Go | `interface{}`, `map[string]interface{}`, unchecked type assertions, configurable generics |
+| TypeScript | `any`, `as any`, `@ts-ignore`, `@ts-expect-error` warnings |
+| Python | `Any`, `# type: ignore`, bare `dict`/`list`, missing public return annotation |
+| Rust | `unsafe`, `.unwrap()`, `.expect()`, `todo!()`, `unimplemented!()` warnings |
+| Zig | `anytype` in public signatures, `@ptrCast`, `@intCast` warnings |
 
-Scope controls (`public_only` or `all`) determine whether rules apply to internal or exported symbols only. Source masking ensures patterns inside strings and comments are ignored.
+Extra banned patterns can be configured per language and are checked after comment/string masking.
 
 ### Cohesion and Coupling
 
-- **Import count**: `error` when file exceeds `max_imports` (default: 15)
-- **Function count**: `error` when file exceeds `max_functions_per_file` (default: 16)
-- **Function length**: `warn` when any function exceeds `max_function_lines` (default: 80)
+- Import count (`max_imports`)
+- Function count per file (`max_functions_per_file`)
+- Function length (`max_function_lines`)
 
 ### Design Rules
 
-- **Too many arguments**: `error` when a function or method exceeds `max_function_arguments` (default: 3)
-- **Too many fields**: `error` when a struct, class, interface, or object-shape type exceeds `max_type_fields` (default: 12)
-- **Hidden coupling**: `warn` when a function touches more external dependencies than its declared inputs plus `max_hidden_touch_excess` (default excess: 0)
-- **Temporal coupling**: `error` when lifecycle methods depend on call order enforced only by boolean flags or ad hoc checks
-- **Boolean state machine**: `error` when a type models lifecycle with more than `max_lifecycle_flags` booleans instead of one explicit state
-- **Ambiguous lifecycle ownership**: `error` when multiple functions plausibly own the same cleanup responsibility
+Guardian builds a lightweight symbol model to report:
+
+- Too many function arguments
+- Too many fields on structs/classes/interfaces/object-shape types/enums
+- Hidden coupling through undeclared external touches
+- Temporal coupling through boolean lifecycle guards
+- Boolean state machines that should be one explicit state
+- Ambiguous lifecycle ownership when multiple functions clean the same resource
 
 ### Formatting
 
-- **Line length**: `warn` when a line exceeds `max_line_length` (default: 120)
-- **Mixed indentation**: `error` for tabs+spaces on the same line
-- **Inconsistent indent style**: `error` when a file mixes tab-indented and space-indented lines beyond a threshold (Go expects tabs; others expect spaces)
-- **Trailing whitespace**: `warn` with count and first occurrence
+- Line length
+- Mixed tabs/spaces on one line
+- Inconsistent file indent style
+- Trailing whitespace
 
 ## Configuration
 
-Guardian auto-discovers `guardian.config.yaml` by walking up from the target file's directory. If the target tree does not provide one, Guardian falls back to the packaged `guardian.config.yaml`. Legacy `guardian.config.json` files are still readable during migration. Use `--config path` to specify an explicit config file.
+Guardian discovers `guardian.config.yaml` by walking up from the target path. If no target config exists, it falls back to a packaged config next to the executable. Legacy `guardian.config.json` remains readable.
 
-See `guardian.config.yaml` for the shipped default config. Key sections:
+Key defaults:
 
 ```yaml
 limits:
@@ -236,135 +134,83 @@ limits:
   max_function_lines: 80
   max_function_arguments: 3
   max_type_fields: 12
-  max_hidden_touch_excess: 2
-  max_lifecycle_flags: 2
-  max_line_length: 120
-  max_excerpt_lines: 12
-  max_excerpt_chars: 1600
 scan:
-  extensions: [".go", ".ts", ".tsx", ".py", ".zig"]
-  ignored_dirs: [".git", "node_modules", "vendor", "dist", "build"]
-go:
-  ban_generics: true
-  surface_scope: "public_only"
-typescript:
-  extra_banned_patterns: []
-python:
-  warn_missing_return_annotation: true
-zig:
-  warn_anytype: true
-  anytype_scope: "public_only"
+  extensions: [".go", ".ts", ".tsx", ".py", ".rs", ".zig"]
+  ignored_dirs: [".git", ".zig-cache", "zig-out", "node_modules", "vendor", "dist", "build", "__pycache__"]
+rust:
+  warn_unsafe: true
+  warn_unwrap: true
+  warn_expect: true
+  warn_todo: true
 ```
 
-### Overrides
-
-Per-path overrides let you relax or tighten rules for specific directories, file roles, or extensions:
-
-```yaml
-overrides:
-  - path_prefixes: ["src/analyzers/"]
-    limits:
-      max_function_lines: 120
-      max_line_length: 160
-  - roles: ["test", "fixture", "sample"]
-    limits:
-      max_function_lines: 90
-    go:
-      ban_generics: false
-```
-
-**Override matchers** (all conditions must match when present):
-
-| Field | Match logic |
-|---|---|
-| `path_prefixes` | Relative path starts with any prefix |
-| `path_suffixes` | Path ends with any suffix |
-| `path_contains` | Path contains any substring |
-| `extensions` | File extension matches any entry |
-| `roles` | Detected role: `test`, `fixture`, `sample`, `generated` |
-
-Overrides are applied in order; later overrides take precedence for the same field.
-
-### Monorepo Support
-
-In batch and folder modes, Guardian resolves config independently per file by walking up from each file's directory. This means different subdirectories can have their own `guardian.config.yaml` with distinct rules. Config resolution results are cached per discovered config path to avoid redundant I/O.
+Per-path overrides can match `path_prefixes`, `path_suffixes`, `path_contains`, `extensions`, and detected `roles` (`test`, `fixture`, `sample`, `generated`). Later overrides win.
 
 ## Output Formats
 
-**Pretty (default)**: ANSI-colored terminal output with file header, violation details, and source excerpts with line numbers.
-
-**JSON (`--json` when piped, or `--raw-json`)**: Machine-readable output per file:
+Single-file JSON:
 
 ```json
 {
-  "file_path": "samples/go_bad.go",
-  "language": "go",
-  "line_count": 42,
+  "file_path": "samples/rs_bad.rs",
+  "language": "rust",
+  "line_count": 44,
   "error_count": 2,
-  "warn_count": 1,
+  "warn_count": 5,
   "pass": false,
   "violations": [
     {
-      "line": 5,
-      "column": 20,
-      "end_line": 5,
-      "rule": "banned_type",
+      "line": 17,
+      "column": 0,
+      "end_line": 29,
+      "rule": "too_many_arguments",
       "severity": "error",
-      "message": "use concrete type or typed interface instead of interface{}",
-      "excerpt": "func Process(data interface{}) {"
+      "message": "function 'start' has 4 arguments (max 3)",
+      "excerpt": "pub fn start(&mut self, client: Client, cache: Cache, metrics: Metrics, audit: Audit) {"
     }
   ]
 }
 ```
 
-Batch JSON wraps results with aggregate counts:
+Batch/folder JSON wraps results with aggregate counts.
 
-```json
-{
-  "file_count": 3,
-  "error_count": 4,
-  "warn_count": 2,
-  "pass": false,
-  "results": [...]
-}
-```
-
-## Tests
-
-```sh
-zig build test
-```
-
-Additional project checks:
+## Tests and Checks
 
 ```sh
 zig build fmt
+zig build test
 zig build e2e
 zig build ci
 ```
 
-The `ci` step runs format checks, Zig unit tests, end-to-end CLI/MCP checks, and a release-packaging end-to-end check. GitHub Actions runs the same suite on macOS and Linux through `nix develop`.
+`ci` runs formatting, Zig unit tests, CLI end-to-end checks, and release packaging checks.
 
-Tests cover the MCP protocol (framing, initialize handshake, tool dispatch), each analyzer module (nesting, complexity, type checking, cohesion, formatting), config loading and override resolution, source masking for strings/comments, and monorepo config caching.
+## Release Archive
+
+Create a local release package:
+
+```sh
+bash ./scripts/package-release.sh
+```
+
+Release archives contain `bin/gd`, `lib/libguardian.*`, `include/guardian.h`, `guardian.config.yaml`, `README.md`, `SPEC.md`, `DELTA.md`, and `LICENSE`.
+
+Guardian does not ship MCP servers, plugins, or skills. Use it through `gd` or the ABI.
 
 ## Project Structure
 
-```
+```text
 src/
-  main.zig              # Entry point: CLI argument parsing, MCP server loop, JSON-RPC dispatch
-  app.zig               # Orchestration: file I/O, batch/folder analysis, output rendering
-  analyzer.zig          # Aggregates all analyzer passes, attaches excerpts, produces JSON
-  config.zig            # Config types, JSON loading, path-based override resolution, discovery
-  types.zig             # Shared types (Language, Severity, Rule, Violation), source masking
-  analyzers/
-    nesting.zig         # Nesting depth analysis (brace and indent-based)
-    complexity.zig      # Cyclomatic complexity analysis
-    type_check.zig      # Language-specific type safety checks
-    cohesion.zig        # Import count, function count, function length
-    formatting.zig      # Line length, indentation consistency, trailing whitespace
-samples/                # Test fixtures: clean and bad examples for each language
-scripts/
-  guardian-check.sh     # Shell wrapper for MCP server requests
-skill/
-  SKILL.md              # Claude Code skill definition for AI agent integration
+  main.zig              # Entry point; routes all args to CLI
+  cli.zig               # CLI parsing and output mode selection
+  app.zig               # File I/O, batch/folder orchestration, output rendering
+  analyzer.zig          # Runs analyzer passes and serializes JSON
+  config*.zig           # Config schema, loading, discovery, overrides, resolver cache
+  source_files.zig      # Folder traversal and source collection
+  symbol_model.zig      # Lightweight language-aware model for design rules
+  types.zig             # Shared types, source masking, JSON escaping
+  c_api.zig             # C ABI exports
+  analyzers/            # Nesting, complexity, type, cohesion, design, formatting checks
+samples/                # Fixture files for supported languages
+scripts/                # CLI and release end-to-end checks, package builder
 ```

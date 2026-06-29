@@ -199,7 +199,7 @@ test "config loader: loads repository guardian.config.yaml by default" {
 
     try testing.expectEqual(@as(u32, 3), loaded.value.limits.max_nesting);
     try testing.expect(loaded.value.go.ban_generics);
-    try testing.expectEqual(@as(usize, 5), loaded.value.scan.extensions.len);
+    try testing.expectEqual(@as(usize, 6), loaded.value.scan.extensions.len);
     try testing.expectEqual(config_schema.SurfaceScope.public_only, loaded.value.go.surface_scope);
     try testing.expectEqual(config_schema.SurfaceScope.public_only, loaded.value.zig.cast_scope);
     try testing.expect(loaded.source_path != null);
@@ -324,6 +324,13 @@ test "config loader: rejects unknown fields" {
         \\    "warn_missing_return_annotation": true,
         \\    "extra_banned_patterns": []
         \\  },
+        \\  "rust": {
+        \\    "warn_unsafe": true,
+        \\    "warn_unwrap": true,
+        \\    "warn_expect": true,
+        \\    "warn_todo": true,
+        \\    "extra_banned_patterns": []
+        \\  },
         \\  "zig": {
         \\    "warn_ptr_cast": true,
         \\    "warn_int_cast": true,
@@ -389,6 +396,12 @@ test "config loader: rejects unknown fields from yaml" {
         \\  warn_bare_dict: true
         \\  warn_bare_list: true
         \\  warn_missing_return_annotation: true
+        \\  extra_banned_patterns: []
+        \\rust:
+        \\  warn_unsafe: true
+        \\  warn_unwrap: true
+        \\  warn_expect: true
+        \\  warn_todo: true
         \\  extra_banned_patterns: []
         \\zig:
         \\  warn_ptr_cast: true

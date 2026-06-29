@@ -1,6 +1,5 @@
 const std = @import("std");
 const guardian_config = @import("config.zig");
-const jsonrpc = @import("jsonrpc.zig");
 const types = @import("types.zig");
 const nesting = @import("analyzers/nesting.zig");
 const complexity = @import("analyzers/complexity.zig");
@@ -291,7 +290,7 @@ fn buildExcerpt(
 }
 
 fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
-    try jsonrpc.writeJsonEscaped(writer, s);
+    try types.writeJsonEscaped(writer, s);
 }
 
 const testing = std.testing;

@@ -8,7 +8,7 @@ const Violation = types.Violation;
 const Rule = types.Rule;
 const ViolationList = std.array_list.Managed(Violation);
 
-/// Analyze nesting depth for brace-delimited languages (Go, TS, Zig).
+/// Analyze nesting depth for brace-delimited languages (Go, TS, Rust, Zig).
 /// Tracks depth per function. Reports when any block exceeds max_nesting.
 pub fn analyzeBraceNesting(
     allocator: std.mem.Allocator,
@@ -272,6 +272,15 @@ fn looksLikeControlBlock(before_brace: []const u8, lang: Language) bool {
             "finally",
             "do",
         }),
+        .rust => startsWithAny(before_brace, &[_][]const u8{
+            "if ",
+            "else if ",
+            "else",
+            "for ",
+            "while ",
+            "loop",
+            "match ",
+        }),
         .zig_lang => startsWithAny(before_brace, &[_][]const u8{
             "if ",
             "else if ",
@@ -292,6 +301,7 @@ fn looksLikeFunctionDef(before_brace: []const u8, lang: Language) bool {
     return switch (lang) {
         .go => std.mem.startsWith(u8, trimmed, "func "),
         .typescript => looksLikeTsFunctionBeforeBrace(trimmed),
+        .rust => looksLikeRustFunctionBeforeBrace(trimmed),
         .zig_lang => std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "pub fn ") or
             std.mem.startsWith(u8, trimmed, "export fn ") or
@@ -328,6 +338,25 @@ fn looksLikeTsFunctionBeforeBrace(trimmed: []const u8) bool {
             "var ",
             "export ",
         });
+}
+
+fn looksLikeRustFunctionBeforeBrace(trimmed: []const u8) bool {
+    if (startsWithAny(trimmed, &[_][]const u8{
+        "fn ",
+        "pub fn ",
+        "pub(crate) fn ",
+        "pub(super) fn ",
+        "pub(in ",
+        "async fn ",
+        "pub async fn ",
+        "unsafe fn ",
+        "pub unsafe fn ",
+        "const fn ",
+        "pub const fn ",
+    })) {
+        return true;
+    }
+    return std.mem.indexOf(u8, trimmed, " fn ") != null;
 }
 
 fn startsWithAny(text: []const u8, prefixes: []const []const u8) bool {

@@ -26,14 +26,6 @@ detect_platform() {
   esac
 }
 
-copy_tree() {
-  local source_path="$1"
-  local target_path="$2"
-
-  rm -rf "$target_path"
-  cp -R "$source_path" "$target_path"
-}
-
 platform="${1:-$(detect_platform)}"
 archive_root="dist/code-guardian-$platform"
 archive_name="code-guardian-$platform.tar.gz"
@@ -44,13 +36,8 @@ rm -rf "$archive_root" "$archive_name"
 mkdir -p "$archive_root/bin" "$archive_root/include" "$archive_root/lib"
 
 cp zig-out/bin/gd "$archive_root/bin/"
-cp zig-out/bin/guardian-mcp "$archive_root/bin/"
 cp zig-out/lib/libguardian.* "$archive_root/lib/"
 cp include/guardian.h "$archive_root/include/"
-cp README.md guardian.config.yaml AGENTS.md LICENSE plugin.mcp.json "$archive_root/"
-
-copy_tree skills "$archive_root/skills"
-copy_tree .codex-plugin "$archive_root/.codex-plugin"
-copy_tree .claude-plugin "$archive_root/.claude-plugin"
+cp README.md SPEC.md DELTA.md guardian.config.yaml LICENSE "$archive_root/"
 
 tar -czf "$archive_name" -C dist "code-guardian-$platform"

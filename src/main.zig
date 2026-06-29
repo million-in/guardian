@@ -1,6 +1,5 @@
 const std = @import("std");
 const cli = @import("cli.zig");
-const server = @import("server.zig");
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
@@ -20,11 +19,6 @@ pub fn main(init: std.process.Init) !void {
         try args.append(try allocator.dupeZ(u8, arg));
     }
 
-    if (args.items.len <= 1) {
-        try server.run(allocator);
-        return;
-    }
-
     cli.run(allocator, args.items[1..]) catch |err| {
         try cli.writeCliError(err);
         std.process.exit(1);
@@ -36,5 +30,4 @@ test {
     _ = @import("cli.zig");
     _ = @import("config.zig");
     _ = @import("root.zig");
-    _ = @import("server.zig");
 }

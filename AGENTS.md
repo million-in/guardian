@@ -1,6 +1,6 @@
-# Code Guardian
+# Guardian
 
-Use Guardian on every code-writing, editing, review, debugging, and refactor task in this repository.
+Use the local `gd` CLI on every code-writing, editing, review, debugging, and refactor task in this repository.
 
 ## Before Coding
 
@@ -25,6 +25,4 @@ Use Guardian on every code-writing, editing, review, debugging, and refactor tas
 
 - CLI: `./zig-out/bin/gd analyze <file>`
 - Batch CLI: `./zig-out/bin/gd batch <file> <file> ...`
-- MCP: use the `guardian` server configured in `.codex/config.toml`
-
-The detailed engineering contract lives in `skills/code-guardian/SKILL.md`.
+- No MCP, plugin, or skill integration is part of this project; use only `gd` or the installed C ABI.

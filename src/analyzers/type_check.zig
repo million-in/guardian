@@ -32,6 +32,10 @@ pub fn analyzeTypes(
             try analyzePythonTypes(allocator, raw_lines, masked_lines, &violations, cfg);
             try appendConfiguredPatterns(allocator, masked_lines, cfg.python.extra_banned_patterns, &violations);
         },
+        .rust => {
+            try analyzeRustTypes(masked_lines, &violations, cfg);
+            try appendConfiguredPatterns(allocator, masked_lines, cfg.rust.extra_banned_patterns, &violations);
+        },
         .zig_lang => {
             try analyzeZigTypes(masked_lines, &violations, cfg);
             try appendConfiguredPatterns(allocator, masked_lines, cfg.zig.extra_banned_patterns, &violations);
@@ -39,6 +43,59 @@ pub fn analyzeTypes(
     }
 
     return violations.toOwnedSlice();
+}
+
+fn analyzeRustTypes(
+    masked_lines: []const []const u8,
+    violations: *ViolationList,
+    cfg: guardian_config.Config,
+) !void {
+    for (masked_lines, 0..) |line, line_idx| {
+        const line_no = @as(u32, @intCast(line_idx)) + 1;
+        if (cfg.rust.warn_unsafe) {
+            try appendRustWordViolations(line, line_no, "unsafe", "unsafe Rust must be isolated and documented", violations);
+        }
+        if (cfg.rust.warn_unwrap) {
+            try appendRustCallViolations(line, line_no, ".unwrap(", "unwrap() can panic — handle the error explicitly", violations);
+        }
+        if (cfg.rust.warn_expect) {
+            try appendRustCallViolations(line, line_no, ".expect(", "expect() can panic — include a recovery path or strong invariant", violations);
+        }
+        if (cfg.rust.warn_todo) {
+            try appendRustCallViolations(line, line_no, "todo!(", "todo!() should not ship in production code", violations);
+            try appendRustCallViolations(line, line_no, "unimplemented!(", "unimplemented!() should not ship in production code", violations);
+        }
+    }
+}
+
+fn appendRustWordViolations(
+    line: []const u8,
+    line_no: u32,
+    word: []const u8,
+    message: []const u8,
+    violations: *ViolationList,
+) !void {
+    var search_pos: usize = 0;
+    while (std.mem.indexOfPos(u8, line, search_pos, word)) |col| {
+        if (hasTokenBoundary(line, col, word.len)) {
+            try appendStaticViolation(violations, line_no, @intCast(col), .banned_type, .warn, message);
+        }
+        search_pos = col + word.len;
+    }
+}
+
+fn appendRustCallViolations(
+    line: []const u8,
+    line_no: u32,
+    needle: []const u8,
+    message: []const u8,
+    violations: *ViolationList,
+) !void {
+    var search_pos: usize = 0;
+    while (std.mem.indexOfPos(u8, line, search_pos, needle)) |col| {
+        try appendStaticViolation(violations, line_no, @intCast(col), .banned_type, .warn, message);
+        search_pos = col + needle.len;
+    }
 }
 
 fn analyzeGoTypes(

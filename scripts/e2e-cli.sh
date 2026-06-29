@@ -21,8 +21,11 @@ grep -F "$red" "$tmp_dir/analyze.pretty" >/dev/null
 grep -F "too_many_arguments" "$tmp_dir/design.pretty" >/dev/null
 grep -F "hidden_coupling" "$tmp_dir/design.pretty" >/dev/null
 
-./zig-out/bin/gd batch src/types.zig src/server.zig --json --config "$absolute_config" > "$tmp_dir/batch.json"
+./zig-out/bin/gd batch src/types.zig src/cli.zig --json --config "$absolute_config" > "$tmp_dir/batch.json"
 jq -e '.file_count == 2 and .pass == true' "$tmp_dir/batch.json" >/dev/null
+
+./zig-out/bin/gd analyze samples/rs_bad.rs --raw-json --config "$absolute_config" > "$tmp_dir/rust.json"
+jq -e '.language == "rust" and .warn_count > 0' "$tmp_dir/rust.json" >/dev/null
 
 ./zig-out/bin/gd folder src --json --config "$absolute_config" > "$tmp_dir/folder.json"
 jq -e '.file_count > 0 and .pass == true' "$tmp_dir/folder.json" >/dev/null

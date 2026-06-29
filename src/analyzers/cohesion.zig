@@ -177,6 +177,7 @@ fn isImportLine(trimmed: []const u8, lang: Language) bool {
         .typescript => std.mem.startsWith(u8, trimmed, "import "),
         .python => std.mem.startsWith(u8, trimmed, "import ") or
             std.mem.startsWith(u8, trimmed, "from "),
+        .rust => std.mem.startsWith(u8, trimmed, "use ") or std.mem.startsWith(u8, trimmed, "extern crate "),
         .zig_lang => std.mem.startsWith(u8, trimmed, "const ") and
             std.mem.indexOf(u8, trimmed, "@import") != null,
     };
@@ -186,6 +187,7 @@ fn isFuncDef(trimmed: []const u8, lang: Language) bool {
     return switch (lang) {
         .go => std.mem.startsWith(u8, trimmed, "func "),
         .typescript => looksLikeTsFunctionDecl(trimmed),
+        .rust => looksLikeRustFunctionDecl(trimmed),
         .zig_lang => std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "pub fn ") or
             std.mem.startsWith(u8, trimmed, "export fn ") or
@@ -199,6 +201,7 @@ fn extractName(trimmed: []const u8, lang: Language) []const u8 {
     return switch (lang) {
         .go => extractGoFuncName(trimmed),
         .typescript => extractTsFunctionName(trimmed),
+        .rust => extractRustFunctionName(trimmed),
         .zig_lang => extractNamedSymbol(trimmed, &[_][]const u8{
             "pub fn ",
             "export fn ",
@@ -210,6 +213,15 @@ fn extractName(trimmed: []const u8, lang: Language) []const u8 {
             "def ",
         }),
     };
+}
+
+fn looksLikeRustFunctionDecl(trimmed: []const u8) bool {
+    return std.mem.indexOf(u8, trimmed, "fn ") != null and std.mem.indexOfScalar(u8, trimmed, '{') != null;
+}
+
+fn extractRustFunctionName(trimmed: []const u8) []const u8 {
+    const fn_pos = std.mem.indexOf(u8, trimmed, "fn ") orelse return "<unknown>";
+    return trimIdentifier(trimmed[fn_pos + "fn ".len ..]);
 }
 
 fn extractTsFunctionName(trimmed: []const u8) []const u8 {

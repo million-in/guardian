@@ -1,5 +1,5 @@
 const std = @import("std");
-const jsonrpc = @import("jsonrpc.zig");
+const types = @import("types.zig");
 
 const Line = struct {
     indent: usize,
@@ -160,7 +160,7 @@ const Parser = struct {
         first.* = false;
 
         try self.buf.writer.writeByte('"');
-        try jsonrpc.writeJsonEscaped(&self.buf.writer, pair.key);
+        try types.writeJsonEscaped(&self.buf.writer, pair.key);
         try self.buf.writer.writeAll("\":");
         if (pair.value.len == 0) {
             try self.writeNestedValue(indent);
@@ -194,7 +194,7 @@ const Parser = struct {
             return;
         }
         try self.buf.writer.writeByte('"');
-        try jsonrpc.writeJsonEscaped(&self.buf.writer, value);
+        try types.writeJsonEscaped(&self.buf.writer, value);
         try self.buf.writer.writeByte('"');
     }
 };
@@ -306,7 +306,7 @@ fn unquoteKey(key: []const u8) []const u8 {
 
 fn writeQuotedString(writer: anytype, value: []const u8) !void {
     try writer.writeByte('"');
-    try jsonrpc.writeJsonEscaped(writer, value[1 .. value.len - 1]);
+    try types.writeJsonEscaped(writer, value[1 .. value.len - 1]);
     try writer.writeByte('"');
 }
 

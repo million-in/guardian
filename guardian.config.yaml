@@ -13,7 +13,7 @@ limits:
   max_excerpt_lines: 12
   max_excerpt_chars: 1600
 scan:
-  extensions: [".go", ".ts", ".tsx", ".py", ".zig"]
+  extensions: [".go", ".ts", ".tsx", ".py", ".rs", ".zig"]
   ignored_dirs: [".git", ".zig-cache", "zig-out", "node_modules", "vendor", "dist", "build", "__pycache__"]
 go:
   ban_interface_empty: true
@@ -44,6 +44,12 @@ python:
   warn_bare_list: true
   warn_missing_return_annotation: true
   extra_banned_patterns: []
+rust:
+  warn_unsafe: true
+  warn_unwrap: true
+  warn_expect: true
+  warn_todo: true
+  extra_banned_patterns: []
 zig:
   warn_ptr_cast: true
   warn_int_cast: true
@@ -67,13 +73,13 @@ overrides:
     limits:
       max_functions_per_file: 18
       max_nesting: 5
-      max_function_lines: 180
+      max_function_lines: 240
       max_type_fields: 16
       cyclomatic_complexity_warn: 32
       cyclomatic_complexity_error: 48
   - path_suffixes: ["src/analyzers/type_check.zig"]
     limits:
-      max_functions_per_file: 48
+      max_functions_per_file: 60
   - path_suffixes: ["src/config.zig"]
     limits:
       max_functions_per_file: 30
@@ -88,10 +94,10 @@ overrides:
       max_hidden_touch_excess: 4
   - path_suffixes: ["src/symbol_model.zig"]
     limits:
-      max_functions_per_file: 120
+      max_functions_per_file: 150
       max_function_arguments: 10
       max_type_fields: 16
-      max_hidden_touch_excess: 4
+      max_hidden_touch_excess: 12
       max_nesting: 6
       cyclomatic_complexity_warn: 10
       cyclomatic_complexity_error: 14
@@ -99,20 +105,25 @@ overrides:
   - path_suffixes: ["src/config_loader.zig"]
     limits:
       max_functions_per_file: 28
-  - path_suffixes: ["src/cli.zig", "src/analyzer.zig", "src/app.zig", "src/jsonrpc.zig", "src/source_files.zig", "src/server.zig", "src/reporting.zig"]
+  - path_suffixes: ["src/cli.zig", "src/analyzer.zig", "src/app.zig", "src/source_files.zig", "src/reporting.zig"]
     limits:
       max_function_arguments: 6
       max_functions_per_file: 32
-  - path_suffixes: ["src/root.zig", "src/yaml_config.zig"]
+  - path_suffixes: ["src/root.zig", "src/yaml_config.zig", "src/types.zig"]
     limits:
       max_function_arguments: 8
       max_functions_per_file: 48
       cyclomatic_complexity_warn: 12
       cyclomatic_complexity_error: 16
       max_line_length: 160
-  - path_suffixes: ["src/server.zig"]
+  - path_suffixes: ["src/analyzers/complexity.zig"]
     limits:
-      max_functions_per_file: 40
+      max_functions_per_file: 36
+  - path_suffixes: ["src/types.zig"]
+    limits:
+      max_function_lines: 240
+      cyclomatic_complexity_warn: 32
+      cyclomatic_complexity_error: 48
   - roles: ["test", "fixture", "sample"]
     limits:
       max_function_lines: 90

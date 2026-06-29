@@ -25,24 +25,18 @@ package_root="$extract_root/code-guardian-$platform"
 
 # Verify expected files exist
 test -x "$package_root/bin/gd"
-test -x "$package_root/bin/guardian-mcp"
 test -f "$package_root/guardian.config.yaml"
+test -f "$package_root/SPEC.md"
+test -f "$package_root/DELTA.md"
 test -f "$package_root/include/guardian.h"
 test -n "$(find "$package_root/lib" -maxdepth 1 -name 'libguardian.*' -type f -print -quit)"
-test -f "$package_root/plugin.mcp.json"
-test -f "$package_root/.claude-plugin/plugin.json"
-test -f "$package_root/.claude-plugin/claude.plugin"
-test -f "$package_root/.claude-plugin/marketplace.json"
-test -f "$package_root/.codex-plugin/plugin.json"
-test -f "$package_root/skills/code-guardian/guardian.md"
-test -f "$package_root/skills/code-guardian/SKILL.md"
-
-# Verify binary paths point to release layout
-jq -e '.mcpServers.guardian.command == "./bin/guardian-mcp"' "$package_root/plugin.mcp.json" >/dev/null
-jq -e '.mcpServers.guardian.command == "${CLAUDE_PLUGIN_ROOT}/bin/guardian-mcp"' "$package_root/.claude-plugin/plugin.json" >/dev/null
-jq -e '.mcpServers == "./plugin.mcp.json"' "$package_root/.codex-plugin/plugin.json" >/dev/null
 
 # Verify local-only files are NOT shipped
 ! test -f "$package_root/.mcp.json"
 ! test -d "$package_root/.claude"
 ! test -d "$package_root/.codex"
+! test -x "$package_root/bin/guardian-mcp"
+! test -f "$package_root/plugin.mcp.json"
+! test -d "$package_root/.claude-plugin"
+! test -d "$package_root/.codex-plugin"
+! test -d "$package_root/skills"

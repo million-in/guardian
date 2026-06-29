@@ -43,6 +43,8 @@ pub const TypeKind = enum {
     typescript_interface,
     typescript_object,
     python_class,
+    rust_struct,
+    rust_enum,
     zig_struct,
 };
 
@@ -73,6 +75,7 @@ pub fn build(
         .go => buildGoModel(allocator, raw_lines, masked_lines),
         .typescript => buildTypeScriptModel(allocator, raw_lines, masked_lines),
         .python => buildPythonModel(allocator, raw_lines, masked_lines),
+        .rust => buildRustModel(allocator, raw_lines, masked_lines),
         .zig_lang => buildZigModel(allocator, raw_lines, masked_lines),
     };
 }
@@ -473,6 +476,118 @@ fn buildPythonModel(
     };
 }
 
+fn buildRustModel(
+    allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
+    masked_lines: []const []const u8,
+) !Model {
+    var functions = std.array_list.Managed(FunctionInfo).init(allocator);
+    var type_infos = std.array_list.Managed(TypeInfo).init(allocator);
+    const scope_names = try collectRustScopeNames(allocator, raw_lines, masked_lines);
+
+    var idx: usize = 0;
+    while (idx < masked_lines.len) {
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
+
+        if (looksLikeRustStructDecl(trimmed)) {
+            const block = try collectBraceBlock(allocator, masked_lines, idx);
+            const name = extractRustNamedDeclName(block.text, "struct");
+            if (name.len > 0) {
+                var builder = TypeBuilder.init(
+                    allocator,
+                    name,
+                    .rust_struct,
+                    try lineNumber(idx),
+                    try lineNumber(block.end_line_idx),
+                    std.mem.startsWith(u8, trimmed, "pub "),
+                );
+                try scanRustStructFields(&builder, masked_lines, block.open_line_idx + 1, block.end_line_idx);
+                try type_infos.append(try builder.finish());
+            }
+            idx = block.end_line_idx + 1;
+            continue;
+        }
+
+        if (looksLikeRustEnumDecl(trimmed)) {
+            const block = try collectBraceBlock(allocator, masked_lines, idx);
+            const name = extractRustNamedDeclName(block.text, "enum");
+            if (name.len > 0) {
+                var builder = TypeBuilder.init(
+                    allocator,
+                    name,
+                    .rust_enum,
+                    try lineNumber(idx),
+                    try lineNumber(block.end_line_idx),
+                    std.mem.startsWith(u8, trimmed, "pub "),
+                );
+                try scanRustEnumVariants(&builder, masked_lines, block.open_line_idx + 1, block.end_line_idx);
+                if (isStateIndicatorName(name)) {
+                    builder.has_explicit_state = true;
+                }
+                try type_infos.append(try builder.finish());
+            }
+            idx = block.end_line_idx + 1;
+            continue;
+        }
+
+        if (looksLikeRustImplDecl(trimmed)) {
+            const block = try collectBraceBlock(allocator, masked_lines, idx);
+            const owner_type = extractRustImplOwner(block.text);
+            try scanRustImpl(
+                allocator,
+                masked_lines,
+                block.open_line_idx + 1,
+                block.end_line_idx,
+                owner_type,
+                scope_names,
+                &functions,
+            );
+            idx = block.end_line_idx + 1;
+            continue;
+        }
+
+        if (looksLikeRustFunctionDecl(trimmed)) {
+            const block = try collectBraceBlock(allocator, masked_lines, idx);
+            const parsed = try parseRustFunctionSignature(allocator, block.text, "");
+            if (parsed.name.len > 0) {
+                const summary = try analyzeRustBody(
+                    allocator,
+                    masked_lines,
+                    block.open_line_idx + 1,
+                    block.end_line_idx,
+                    parsed.receiver_name,
+                    parsed.param_names,
+                    scope_names,
+                );
+                try functions.append(.{
+                    .name = parsed.name,
+                    .owner_type = parsed.owner_type,
+                    .receiver_name = parsed.receiver_name,
+                    .start_line = try lineNumber(idx),
+                    .body_start_line = if (block.open_line_idx + 1 < masked_lines.len) try lineNumber(block.open_line_idx + 1) else try lineNumber(idx),
+                    .end_line = try lineNumber(block.end_line_idx),
+                    .is_public = parsed.is_public,
+                    .argument_count = parsed.argument_count,
+                    .declared = summary.declared,
+                    .touched = summary.touched,
+                    .bool_reads = summary.bool_reads,
+                    .lifecycle_actions = summary.lifecycle_actions,
+                    .has_explicit_scope_cleanup = summary.has_explicit_scope_cleanup,
+                });
+            }
+            idx = block.end_line_idx + 1;
+            continue;
+        }
+
+        idx += 1;
+    }
+
+    return .{
+        .functions = try functions.toOwnedSlice(),
+        .types = try type_infos.toOwnedSlice(),
+    };
+}
+
 fn buildZigModel(
     allocator: std.mem.Allocator,
     raw_lines: []const []const u8,
@@ -683,6 +798,35 @@ fn parsePythonFunctionSignature(
     };
 }
 
+fn parseRustFunctionSignature(
+    allocator: std.mem.Allocator,
+    signature: []const u8,
+    owner_hint: []const u8,
+) !ParsedFunction {
+    const text = std.mem.trim(u8, signature, " \t");
+    const fn_pos = std.mem.indexOf(u8, text, "fn ") orelse return .{ .name = "", .argument_count = 0, .is_public = false };
+    const after = text[fn_pos + "fn ".len ..];
+    const name = firstIdentifier(after);
+    if (name.len == 0) {
+        return .{ .name = "", .argument_count = 0, .is_public = false };
+    }
+
+    const name_end = scanIdentifier(after, 0);
+    const params_open = std.mem.indexOfScalarPos(u8, after, name_end, '(') orelse return .{ .name = "", .argument_count = 0, .is_public = false };
+    const params_close = findMatchingForward(after, params_open, '(', ')') orelse return .{ .name = "", .argument_count = 0, .is_public = false };
+    const param_segment = after[params_open + 1 .. params_close];
+    const parsed_params = try parseRustParams(allocator, param_segment, owner_hint);
+
+    return .{
+        .name = name,
+        .owner_type = parsed_params.owner_type,
+        .receiver_name = parsed_params.receiver_name,
+        .argument_count = try types.usizeToU32(parsed_params.param_names.len),
+        .is_public = std.mem.startsWith(u8, text, "pub "),
+        .param_names = parsed_params.param_names,
+    };
+}
+
 fn parseZigFunctionSignature(
     allocator: std.mem.Allocator,
     signature: []const u8,
@@ -729,6 +873,54 @@ const ZigParamParse = struct {
     receiver_name: []const u8,
     param_names: []const []const u8,
 };
+
+const RustParamParse = struct {
+    owner_type: []const u8,
+    receiver_name: []const u8,
+    param_names: []const []const u8,
+};
+
+fn parseRustParams(allocator: std.mem.Allocator, params: []const u8, owner_hint: []const u8) !RustParamParse {
+    const segments = try topLevelSegments(allocator, params);
+    var names = std.array_list.Managed([]const u8).init(allocator);
+    var receiver_name: []const u8 = "";
+    const owner_type = owner_hint;
+
+    for (segments) |segment| {
+        const trimmed = std.mem.trim(u8, segment, " \t");
+        if (trimmed.len == 0) {
+            continue;
+        }
+        if (isRustSelfParam(trimmed)) {
+            receiver_name = "self";
+            continue;
+        }
+
+        const colon = std.mem.indexOfScalar(u8, trimmed, ':') orelse continue;
+        var name = std.mem.trim(u8, trimmed[0..colon], " \t");
+        if (std.mem.startsWith(u8, name, "mut ")) {
+            name = std.mem.trimStart(u8, name["mut ".len..], " \t");
+        }
+        if (name.len > 0 and !std.mem.eql(u8, name, "_")) {
+            try addUniqueString(&names, firstIdentifier(name));
+        }
+    }
+
+    return .{
+        .owner_type = owner_type,
+        .receiver_name = receiver_name,
+        .param_names = try names.toOwnedSlice(),
+    };
+}
+
+fn isRustSelfParam(trimmed: []const u8) bool {
+    return std.mem.eql(u8, trimmed, "self") or
+        std.mem.eql(u8, trimmed, "mut self") or
+        std.mem.eql(u8, trimmed, "&self") or
+        std.mem.eql(u8, trimmed, "&mut self") or
+        std.mem.startsWith(u8, trimmed, "self:") or
+        std.mem.startsWith(u8, trimmed, "mut self:");
+}
 
 fn parseZigParams(allocator: std.mem.Allocator, params: []const u8, owner_hint: []const u8) !ZigParamParse {
     const segments = try topLevelSegments(allocator, params);
@@ -964,6 +1156,109 @@ fn scanPythonClass(
     }
 }
 
+fn scanRustStructFields(
+    builder: *TypeBuilder,
+    lines: []const []const u8,
+    start_idx: usize,
+    end_idx: usize,
+) !void {
+    var idx = start_idx;
+    while (idx < end_idx) : (idx += 1) {
+        var trimmed = std.mem.trim(u8, lines[idx], " \t,");
+        if (trimmed.len == 0 or startsWithAny(trimmed, &[_][]const u8{ "fn ", "pub fn ", "impl ", "where " })) {
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "pub ")) {
+            trimmed = std.mem.trimStart(u8, trimmed["pub ".len..], " \t");
+        }
+        const colon = std.mem.indexOfScalar(u8, trimmed, ':') orelse continue;
+        const name = firstIdentifier(trimmed[0..colon]);
+        if (name.len == 0) {
+            continue;
+        }
+        const type_part = std.mem.trim(u8, trimmed[colon + 1 ..], " \t,");
+        const is_bool = std.mem.startsWith(u8, type_part, "bool") or std.mem.indexOf(u8, type_part, " bool") != null;
+        try builder.addField(name, is_bool);
+        if (isExplicitStateField(name, type_part, is_bool)) {
+            builder.has_explicit_state = true;
+        }
+    }
+}
+
+fn scanRustEnumVariants(
+    builder: *TypeBuilder,
+    lines: []const []const u8,
+    start_idx: usize,
+    end_idx: usize,
+) !void {
+    var idx = start_idx;
+    while (idx < end_idx) : (idx += 1) {
+        const trimmed = std.mem.trim(u8, lines[idx], " \t,");
+        if (trimmed.len == 0) {
+            continue;
+        }
+        const name = firstIdentifier(trimmed);
+        if (name.len > 0) {
+            try builder.addField(name, false);
+        }
+    }
+}
+
+fn scanRustImpl(
+    allocator: std.mem.Allocator,
+    masked_lines: []const []const u8,
+    start_idx: usize,
+    end_idx: usize,
+    owner_type: []const u8,
+    scope_names: []const []const u8,
+    functions: *std.array_list.Managed(FunctionInfo),
+) !void {
+    var idx = start_idx;
+    while (idx < end_idx) {
+        const trimmed = std.mem.trimStart(u8, masked_lines[idx], " \t");
+        if (trimmed.len == 0) {
+            idx += 1;
+            continue;
+        }
+        if (looksLikeRustFunctionDecl(trimmed)) {
+            const block = try collectBraceBlock(allocator, masked_lines, idx);
+            if (block.end_line_idx > end_idx) {
+                break;
+            }
+            const parsed = try parseRustFunctionSignature(allocator, block.text, owner_type);
+            if (parsed.name.len > 0) {
+                const summary = try analyzeRustBody(
+                    allocator,
+                    masked_lines,
+                    block.open_line_idx + 1,
+                    block.end_line_idx,
+                    parsed.receiver_name,
+                    parsed.param_names,
+                    scope_names,
+                );
+                try functions.append(.{
+                    .name = parsed.name,
+                    .owner_type = parsed.owner_type,
+                    .receiver_name = parsed.receiver_name,
+                    .start_line = try lineNumber(idx),
+                    .body_start_line = if (block.open_line_idx + 1 < masked_lines.len) try lineNumber(block.open_line_idx + 1) else try lineNumber(idx),
+                    .end_line = try lineNumber(block.end_line_idx),
+                    .is_public = parsed.is_public,
+                    .argument_count = parsed.argument_count,
+                    .declared = summary.declared,
+                    .touched = summary.touched,
+                    .bool_reads = summary.bool_reads,
+                    .lifecycle_actions = summary.lifecycle_actions,
+                    .has_explicit_scope_cleanup = summary.has_explicit_scope_cleanup,
+                });
+            }
+            idx = block.end_line_idx + 1;
+            continue;
+        }
+        idx += 1;
+    }
+}
+
 fn collectPythonInitFields(
     builder: *TypeBuilder,
     raw_lines: []const []const u8,
@@ -1153,6 +1448,41 @@ fn analyzePythonBody(
     return body.finish();
 }
 
+fn analyzeRustBody(
+    allocator: std.mem.Allocator,
+    lines: []const []const u8,
+    start_idx: usize,
+    end_idx: usize,
+    receiver_name: []const u8,
+    param_names: []const []const u8,
+    scope_names: []const []const u8,
+) !BodySummary {
+    var body = BodyBuilder.init(allocator);
+    try seedDeclaredNames(&body.declared, param_names);
+    if (receiver_name.len > 0) {
+        try addUniqueString(&body.declared, receiver_name);
+    }
+
+    var idx = start_idx;
+    while (idx < end_idx and idx < lines.len) : (idx += 1) {
+        const line = lines[idx];
+        const trimmed = std.mem.trimStart(u8, line, " \t");
+        if (trimmed.len == 0) {
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "drop(") or std.mem.startsWith(u8, trimmed, "let _guard")) {
+            body.has_explicit_scope_cleanup = true;
+        }
+
+        try appendRustDeclarations(&body.declared, trimmed);
+        try appendCommonTouches(&body, trimmed, receiver_name, &rust_keywords, scope_names, &rust_builtins);
+        try appendLifecycleActions(&body.lifecycle_actions, allocator, trimmed, try lineNumber(idx));
+    }
+
+    return body.finish();
+}
+
 fn analyzeZigBody(
     allocator: std.mem.Allocator,
     lines: []const []const u8,
@@ -1322,6 +1652,46 @@ fn collectPythonScopeNames(
         if (findPythonAssignmentOperator(trimmed)) |pos| {
             try appendDelimitedNames(&names, trimmed[0..pos]);
         }
+    }
+
+    return names.toOwnedSlice();
+}
+
+fn collectRustScopeNames(
+    allocator: std.mem.Allocator,
+    raw_lines: []const []const u8,
+    masked_lines: []const []const u8,
+) ![]const []const u8 {
+    var names = std.array_list.Managed([]const u8).init(allocator);
+    var depth: i32 = 0;
+
+    for (raw_lines, masked_lines) |raw_line, masked_line| {
+        const raw_trimmed = std.mem.trimStart(u8, raw_line, " \t");
+        const masked_trimmed = std.mem.trimStart(u8, masked_line, " \t");
+
+        if (depth == 0) {
+            if (std.mem.startsWith(u8, masked_trimmed, "use ")) {
+                try appendRustUseNames(&names, masked_trimmed["use ".len..]);
+            } else if (std.mem.startsWith(u8, masked_trimmed, "extern crate ")) {
+                try addUniqueString(&names, firstIdentifier(masked_trimmed["extern crate ".len..]));
+            } else if (looksLikeRustStructDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractRustNamedDeclName(masked_trimmed, "struct"));
+            } else if (looksLikeRustEnumDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractRustNamedDeclName(masked_trimmed, "enum"));
+            } else if (looksLikeRustFunctionDecl(masked_trimmed)) {
+                try addUniqueString(&names, extractRustScopeFunctionName(raw_trimmed));
+            } else if (std.mem.startsWith(u8, masked_trimmed, "const ") or
+                std.mem.startsWith(u8, masked_trimmed, "static ") or
+                std.mem.startsWith(u8, masked_trimmed, "pub const ") or
+                std.mem.startsWith(u8, masked_trimmed, "pub static "))
+            {
+                if (std.mem.indexOfScalar(u8, masked_trimmed, '=')) |eq| {
+                    try appendDelimitedNames(&names, extractRustBindingPrefix(masked_trimmed[0..eq]));
+                }
+            }
+        }
+
+        depth += braceDelta(masked_trimmed);
     }
 
     return names.toOwnedSlice();
@@ -1592,6 +1962,32 @@ fn appendPythonDeclarations(list: *std.array_list.Managed([]const u8), line: []c
     }
 }
 
+fn appendRustDeclarations(list: *std.array_list.Managed([]const u8), line: []const u8) !void {
+    if (std.mem.startsWith(u8, line, "let ")) {
+        var rest = std.mem.trimStart(u8, line["let ".len..], " \t");
+        if (std.mem.startsWith(u8, rest, "mut ")) {
+            rest = std.mem.trimStart(u8, rest["mut ".len..], " \t");
+        }
+        if (std.mem.indexOfScalar(u8, rest, '=')) |pos| {
+            try appendDelimitedNames(list, rest[0..pos]);
+        } else if (std.mem.indexOfScalar(u8, rest, ':')) |pos| {
+            try appendDelimitedNames(list, rest[0..pos]);
+        }
+    }
+
+    if (std.mem.startsWith(u8, line, "for ")) {
+        if (std.mem.indexOf(u8, line, " in ")) |pos| {
+            try appendDelimitedNames(list, line["for ".len..pos]);
+        }
+    }
+
+    if (std.mem.indexOf(u8, line, "|")) |first_pipe| {
+        if (std.mem.indexOfScalarPos(u8, line, first_pipe + 1, '|')) |second_pipe| {
+            try appendDelimitedNames(list, line[first_pipe + 1 .. second_pipe]);
+        }
+    }
+}
+
 fn appendZigDeclarations(list: *std.array_list.Managed([]const u8), line: []const u8) !void {
     if (std.mem.startsWith(u8, line, "const ") or std.mem.startsWith(u8, line, "var ")) {
         const rest = if (std.mem.startsWith(u8, line, "const ")) line["const ".len..] else line["var ".len..];
@@ -1746,6 +2142,35 @@ fn appendPythonFromImportNames(list: *std.array_list.Managed([]const u8), text: 
     }
 }
 
+fn appendRustUseNames(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
+    const trimmed = std.mem.trim(u8, text, " \t;");
+    if (std.mem.startsWith(u8, trimmed, "crate::") or std.mem.startsWith(u8, trimmed, "self::") or std.mem.startsWith(u8, trimmed, "super::")) {
+        return;
+    }
+
+    if (std.mem.indexOf(u8, trimmed, " as ")) |as_pos| {
+        try addUniqueString(list, firstIdentifier(trimmed[as_pos + " as ".len ..]));
+        return;
+    }
+
+    if (std.mem.indexOfScalar(u8, trimmed, '{')) |open| {
+        if (open > 0) {
+            const prefix = std.mem.trimEnd(u8, trimmed[0..open], ":");
+            const base = lastTypeIdentifier(prefix);
+            if (base.len > 0) {
+                try addUniqueString(list, base);
+            }
+        }
+        return;
+    }
+
+    if (std.mem.lastIndexOf(u8, trimmed, "::")) |sep| {
+        try addUniqueString(list, firstIdentifier(trimmed[sep + 2 ..]));
+        return;
+    }
+    try addUniqueString(list, firstIdentifier(trimmed));
+}
+
 fn appendPythonWithBindings(list: *std.array_list.Managed([]const u8), text: []const u8) !void {
     const segments = try topLevelSegments(list.allocator, std.mem.trimEnd(u8, text, ":"));
     for (segments) |segment| {
@@ -1826,6 +2251,11 @@ fn extractTypeScriptScopeFunctionName(text: []const u8) []const u8 {
     return "";
 }
 
+fn extractRustScopeFunctionName(text: []const u8) []const u8 {
+    const fn_pos = std.mem.indexOf(u8, text, "fn ") orelse return "";
+    return firstIdentifier(text[fn_pos + "fn ".len ..]);
+}
+
 fn extractGoScopeFunctionName(text: []const u8) []const u8 {
     if (!std.mem.startsWith(u8, text, "func ")) {
         return "";
@@ -1851,6 +2281,15 @@ fn extractPythonScopeFunctionName(text: []const u8) []const u8 {
 
 fn extractTypeScriptBindingPrefix(text: []const u8) []const u8 {
     inline for (&[_][]const u8{ "export const ", "export let ", "export var ", "const ", "let ", "var " }) |prefix| {
+        if (std.mem.startsWith(u8, text, prefix)) {
+            return text[prefix.len..];
+        }
+    }
+    return text;
+}
+
+fn extractRustBindingPrefix(text: []const u8) []const u8 {
+    inline for (&[_][]const u8{ "pub const ", "pub static ", "const ", "static " }) |prefix| {
         if (std.mem.startsWith(u8, text, prefix)) {
             return text[prefix.len..];
         }
@@ -2166,6 +2605,30 @@ fn extractPythonClassName(trimmed: []const u8) []const u8 {
     return firstIdentifier(trimmed["class ".len..]);
 }
 
+fn extractRustNamedDeclName(text: []const u8, keyword: []const u8) []const u8 {
+    const pos = std.mem.indexOf(u8, text, keyword) orelse return "";
+    return firstIdentifier(text[pos + keyword.len ..]);
+}
+
+fn extractRustImplOwner(text: []const u8) []const u8 {
+    if (!std.mem.startsWith(u8, std.mem.trimStart(u8, text, " \t"), "impl")) {
+        return "";
+    }
+    const open = std.mem.indexOfScalar(u8, text, '{') orelse text.len;
+    var head = std.mem.trim(u8, text[0..open], " \t");
+    if (std.mem.startsWith(u8, head, "impl")) {
+        head = std.mem.trimStart(u8, head["impl".len..], " \t");
+    }
+    if (std.mem.startsWith(u8, head, "<")) {
+        const close = findMatchingForward(head, 0, '<', '>') orelse return "";
+        head = std.mem.trimStart(u8, head[close + 1 ..], " \t");
+    }
+    if (std.mem.indexOf(u8, head, " for ")) |for_pos| {
+        head = std.mem.trimStart(u8, head[for_pos + " for ".len ..], " \t");
+    }
+    return firstIdentifier(head);
+}
+
 fn extractZigStructName(trimmed: []const u8) []const u8 {
     if (std.mem.indexOf(u8, trimmed, "const ") == null) {
         return "";
@@ -2232,6 +2695,24 @@ fn looksLikePythonFieldLine(trimmed: []const u8) bool {
         return false;
     }
     return std.mem.indexOfScalar(u8, trimmed, ':') != null or std.mem.indexOfScalar(u8, trimmed, '=') != null;
+}
+
+fn looksLikeRustStructDecl(trimmed: []const u8) bool {
+    return startsWithAny(trimmed, &[_][]const u8{ "struct ", "pub struct " }) or
+        (std.mem.indexOf(u8, trimmed, " struct ") != null and std.mem.indexOfScalar(u8, trimmed, '{') != null);
+}
+
+fn looksLikeRustEnumDecl(trimmed: []const u8) bool {
+    return startsWithAny(trimmed, &[_][]const u8{ "enum ", "pub enum " }) or
+        (std.mem.indexOf(u8, trimmed, " enum ") != null and std.mem.indexOfScalar(u8, trimmed, '{') != null);
+}
+
+fn looksLikeRustImplDecl(trimmed: []const u8) bool {
+    return std.mem.startsWith(u8, trimmed, "impl") and std.mem.indexOfScalar(u8, trimmed, '{') != null;
+}
+
+fn looksLikeRustFunctionDecl(trimmed: []const u8) bool {
+    return std.mem.indexOf(u8, trimmed, "fn ") != null and std.mem.indexOfScalar(u8, trimmed, '{') != null;
 }
 
 fn looksLikeZigStructDecl(trimmed: []const u8) bool {
@@ -2490,6 +2971,13 @@ const python_keywords = [_][]const u8{
     "raise", "return",  "True",   "try",   "while", "with",     "yield",
 };
 
+const rust_keywords = [_][]const u8{
+    "as",     "async", "await", "break", "const", "continue", "crate", "else",  "enum",
+    "false",  "fn",    "for",   "if",    "impl",  "in",       "let",   "loop",  "match",
+    "mod",    "move",  "mut",   "pub",   "ref",   "return",   "self",  "Self",  "static",
+    "struct", "super", "trait", "true",  "type",  "unsafe",   "use",   "where", "while",
+};
+
 const zig_keywords = [_][]const u8{
     "anytype",  "asm",   "break", "catch", "comptime", "const", "continue", "defer", "else",
     "errdefer", "false", "fn",    "for",   "if",       "null",  "orelse",   "pub",   "return",
@@ -2515,6 +3003,12 @@ const python_builtins = [_][]const u8{
     "all",     "any",       "abs",   "min",   "max",        "sum",     "type",
     "id",      "open",      "input", "exit",  "repr",       "iter",    "next",
     "vars",    "dir",
+};
+
+const rust_builtins = [_][]const u8{
+    "Box",    "Clone", "Copy",    "Default", "Drop", "Err",  "None",  "Ok",     "Option",
+    "Result", "Some",  "String",  "Vec",     "bool", "char", "drop",  "format", "i32",
+    "i64",    "isize", "println", "str",     "u32",  "u64",  "usize", "vec",
 };
 
 const zig_builtins = [_][]const u8{};
@@ -2757,4 +3251,44 @@ test "symbol model: Zig test blocks are analyzed as functions" {
     const model = try build(arena.allocator(), raw_lines, masked_lines, .zig_lang);
     try testing.expectEqual(@as(usize, 1), model.functions.len);
     try testing.expectEqualStrings("runs setup", model.functions[0].name);
+}
+
+test "symbol model: Rust structs impl methods and free functions are extracted" {
+    const src =
+        \\pub struct Session {
+        \\    active: bool,
+        \\    ready: bool,
+        \\    client: Client,
+        \\}
+        \\
+        \\impl Session {
+        \\    pub fn start(&mut self, client: Client, retries: usize) {
+        \\        if self.active {
+        \\            return;
+        \\        }
+        \\        boot(client);
+        \\    }
+        \\}
+        \\
+        \\fn build(client: Client, opts: Options) -> Session {
+        \\    Session { active: false, ready: false, client }
+        \\}
+    ;
+
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+    const masked = try types.maskSource(testing.allocator, src, .rust);
+    defer testing.allocator.free(masked);
+    const masked_lines = try types.splitLines(testing.allocator, masked);
+    defer testing.allocator.free(masked_lines);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const model = try build(arena.allocator(), raw_lines, masked_lines, .rust);
+    try testing.expectEqual(@as(usize, 1), model.types.len);
+    try testing.expectEqual(@as(u32, 3), model.types[0].field_count);
+    try testing.expectEqual(@as(usize, 2), model.functions.len);
+    try testing.expectEqualStrings("Session", model.functions[0].owner_type);
+    try testing.expectEqual(@as(u32, 2), model.functions[0].argument_count);
 }

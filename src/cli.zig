@@ -3,7 +3,6 @@ const analyzer = @import("analyzer.zig");
 const app = @import("app.zig");
 const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
-const server = @import("server.zig");
 
 const CliOptions = struct {
     json_output: bool = false,
@@ -15,7 +14,6 @@ const Command = enum {
     analyze,
     batch,
     folder,
-    serve,
     help,
 };
 
@@ -27,13 +25,16 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
     var stderr = std.Io.File.stderr().writerStreaming(compat.io, &stderr_buffer);
     defer stdout.interface.flush() catch {};
     defer stderr.interface.flush() catch {};
+    if (args.len == 0) {
+        try writeUsage(&stderr.interface);
+        return error.InvalidArguments;
+    }
     const command = parseCommand(args[0]) orelse {
         try writeUsage(&stderr.interface);
         return error.InvalidArguments;
     };
 
     switch (command) {
-        .serve => return server.run(allocator),
         .help => return writeUsage(&stdout.interface),
         .analyze, .batch, .folder => {},
     }
@@ -47,7 +48,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
         .analyze => try runAnalyzeCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .batch => try runBatchCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .folder => try runFolderCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
-        .serve, .help => unreachable,
+        .help => unreachable,
     }
 }
 
@@ -57,7 +58,6 @@ fn writeUsage(writer: anytype) !void {
         \\  gd analyze <file> [--json] [--raw-json] [--config path]
         \\  gd batch <file> <file> [...] [--json] [--raw-json] [--config path]
         \\  gd folder <dir> [--json] [--raw-json] [--config path]
-        \\  gd serve
         \\
         \\Config:
         \\  Auto-loads `guardian.config.yaml` from the target path upward.
@@ -228,7 +228,6 @@ fn parseCommand(arg: []const u8) ?Command {
     if (std.mem.eql(u8, arg, "analyze")) return .analyze;
     if (std.mem.eql(u8, arg, "batch")) return .batch;
     if (std.mem.eql(u8, arg, "folder")) return .folder;
-    if (std.mem.eql(u8, arg, "serve")) return .serve;
     if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help")) return .help;
     return null;
 }

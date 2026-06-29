@@ -74,6 +74,22 @@ pub const GoRulesPatch = struct {
     extra_banned_patterns: ?[]const Pattern = null,
 };
 
+pub const RustRules = struct {
+    warn_unsafe: bool,
+    warn_unwrap: bool,
+    warn_expect: bool,
+    warn_todo: bool,
+    extra_banned_patterns: []const Pattern,
+};
+
+pub const RustRulesPatch = struct {
+    warn_unsafe: ?bool = null,
+    warn_unwrap: ?bool = null,
+    warn_expect: ?bool = null,
+    warn_todo: ?bool = null,
+    extra_banned_patterns: ?[]const Pattern = null,
+};
+
 pub const TypeScriptRules = struct {
     ban_any: bool,
     ban_as_any: bool,
@@ -138,6 +154,7 @@ pub const Override = struct {
     go: GoRulesPatch = .{},
     typescript: TypeScriptRulesPatch = .{},
     python: PythonRulesPatch = .{},
+    rust: RustRulesPatch = .{},
     zig: ZigRulesPatch = .{},
 
     pub fn matches(self: Override, file_path: []const u8) bool {
@@ -167,6 +184,13 @@ pub const Config = struct {
     go: GoRules,
     typescript: TypeScriptRules,
     python: PythonRules,
+    rust: RustRules = .{
+        .warn_unsafe = true,
+        .warn_unwrap = true,
+        .warn_expect = true,
+        .warn_todo = true,
+        .extra_banned_patterns = &.{},
+    },
     zig: ZigRules,
     overrides: []const Override = &.{},
 
@@ -196,6 +220,7 @@ pub const Config = struct {
             applyGoPatch(&resolved.go, override_cfg.go);
             applyTypeScriptPatch(&resolved.typescript, override_cfg.typescript);
             applyPythonPatch(&resolved.python, override_cfg.python);
+            applyRustPatch(&resolved.rust, override_cfg.rust);
             applyZigPatch(&resolved.zig, override_cfg.zig);
         }
 
@@ -235,6 +260,18 @@ fn applyLimitsPatch(target: *Limits, patch: LimitsPatch) void {
         "max_excerpt_chars",
     }) |field_name| {
         applyOptionalField(Limits, LimitsPatch, target, patch, field_name);
+    }
+}
+
+fn applyRustPatch(target: *RustRules, patch: RustRulesPatch) void {
+    inline for (.{
+        "warn_unsafe",
+        "warn_unwrap",
+        "warn_expect",
+        "warn_todo",
+        "extra_banned_patterns",
+    }) |field_name| {
+        applyOptionalField(RustRules, RustRulesPatch, target, patch, field_name);
     }
 }
 
