@@ -9,3 +9,9 @@
 
 # Delta team ledger is local runtime state; keep project config tracked.
 .delta/ledger/
+
+# Local progress scratch files should not be tracked or read by Delta.
+progress.md
+
+# Nested Delta project metadata is local state for imported repos.
+*/.delta/
