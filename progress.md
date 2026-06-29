@@ -1,0 +1,31 @@
+# Progress
+
+- [fixed] 2.1 `src/analyzers/cohesion.zig` — Go — switched import counting to use raw lines with explicit `import (...)` block state so each entry is counted.
+- [fixed] 2.2 `src/analyzers/complexity.zig` — Python — replaced one-hit-per-line logic with per-keyword occurrence counting.
+- [fixed] 2.3 `src/analyzers/complexity.zig` — Python — added identifier-boundary checks so `elif` does not also count as `if`.
+- [fixed] 2.4 `src/analyzers/complexity.zig` — Go, TypeScript, Zig — `else if` is now counted with longest-match scanning, not as both `else if` and `if`.
+- [fixed] 2.5 `src/analyzers/design.zig`, `src/symbol_model.zig` — Go, TypeScript, Python, Zig — hidden coupling now excludes imports, top-level names, and builtins from touched-root counting.
+- [fixed] 2.6 `src/symbol_model.zig` — Go, TypeScript, Python, Zig — lifecycle verbs now require a real name boundary instead of matching arbitrary prefixes.
+- [fixed] 2.7 `src/symbol_model.zig`, `src/analyzers/type_check.zig` — Python — multiline signatures now track delimiter depth and stop only at a top-level `:`.
+- [fixed] 2.8 `src/analyzers/type_check.zig` — Python — `Any` checks now require both leading and trailing token boundaries.
+- [fixed] 2.9 `src/analyzers/type_check.zig` — TypeScript — `: any` and `as any` now require token boundaries before reporting.
+- [fixed] 2.10 `src/analyzers/cohesion.zig` — TypeScript — added named arrow declarations and method-like signatures to file function counting.
+- [fixed] 2.11 `src/analyzers/cohesion.zig`, `src/analyzers/complexity.zig`, `src/analyzers/nesting.zig` — TypeScript — added `export default function` / `export default async function` detection.
+- [fixed] 2.12 `src/analyzers/nesting.zig` — TypeScript — replaced the single in-function flag with brace/function stacks and narrower arrow-function classification.
+- [fixed] 2.13 `src/analyzers/nesting.zig` — Go, TypeScript, Zig — braces are classified as function/control/literal so object and struct literals no longer increase nesting.
+- [fixed] 2.14 `src/analyzers/nesting.zig` — Python — nesting now subtracts the function/body frame so Python depth matches brace-language semantics.
+- [fixed] 2.15 `src/types.zig` — Zig — line-leading `\\\\` multiline string rows are masked before analyzers see their contents.
+- [fixed] 2.16 `src/analyzer.zig`, `src/jsonrpc.zig` — Go, TypeScript, Python, Zig — analyzer JSON output now reuses the shared control-byte-safe escaper.
+- [fixed] 2.17 `src/analyzers/type_check.zig` — Go — type assertion checks now walk every `.(...)` occurrence and apply comma-ok locally.
+- [fixed] 2.18 `src/analyzers/formatting.zig` — Go, TypeScript, Python, Zig — inconsistent-indent uses ratio-preserving multiplication instead of truncating division.
+- [fixed] 2.19 `src/analyzer.zig` — Go, TypeScript, Python, Zig — excerpt building now uses bounded `usize` math with explicit truncation state.
+- [fixed] 2.20 `src/server.zig` — MCP — framed payloads are capped and folder scans are restricted to the working directory or resolved config root.
+- [fixed] 2.21 `src/config_loader.zig` — config — unknown JSON keys now fail config loading instead of being ignored.
+- [fixed] 2.22 `src/analyzers/complexity.zig`, `src/analyzers/nesting.zig` — Go, TypeScript, Zig — removed dead string/comment tracking and documented masked-input behavior.
+- [documented] 2.23 `src/analyzers/complexity.zig` — Go, TypeScript — bare `else` correctly adds no complexity; the bug is already tracked under 2.4’s `else if` double-count.
+- [fixed] 2.24 `src/symbol_model.zig` — Python — declaration parsing now skips comparisons/augmented ops and extracts walrus bindings explicitly.
+- [fixed] 2.25 `src/symbol_model.zig` — Python — `with ... as ...` bindings are split per context manager instead of treating the tail as one name.
+- [fixed] 2.26 `src/types.zig` — TypeScript — template-expression masking now ignores nested strings and comments while tracking `${...}` depth.
+- [fixed] 2.27 `src/symbol_model.zig`, `src/analyzers/cohesion.zig`, `src/analyzers/complexity.zig`, `src/analyzers/nesting.zig` — Zig — `test` blocks are treated as function-like analysis units.
+- [fixed] 2.28 `src/symbol_model.zig` — Go — embedded dotted and pointer-embedded fields now keep the type name instead of the package/root token.
+- [documented] 2.29 `src/config_loader.zig`, `src/config_resolver.zig` — config cache — the old `<default>` sentinel described in the report is no longer present; current caching still uses one default config path for fallback cases, so I will only adjust this if a real behavioral bug remains after the other fixes.

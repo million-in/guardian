@@ -16,3 +16,6 @@ zig-out/
 *~
 .vscode/
 .idea/
+
+# Delta runtime ledger is local state; commit Delta project config, not ledger events.
+.delta/ledger/
