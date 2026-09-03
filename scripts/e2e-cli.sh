@@ -34,6 +34,13 @@ jq -e '.file_count > 0 and .pass == true' "$tmp_dir/folder.json" >/dev/null
 grep -F "Scanned" "$tmp_dir/folder.pretty" >/dev/null
 grep -F "$gray" "$tmp_dir/folder.pretty" >/dev/null
 
+./zig-out/bin/gd audit samples --raw-json --config "$absolute_config" > "$tmp_dir/audit.json"
+jq -e '.score.overall >= 0 and .score.threshold == 70 and .proof_status == "skipped" and .static.file_count > 0' "$tmp_dir/audit.json" >/dev/null
+
+./zig-out/bin/gd audit samples --config "$absolute_config" > "$tmp_dir/audit.pretty"
+grep -F "Audit score" "$tmp_dir/audit.pretty" >/dev/null
+grep -F "Categories:" "$tmp_dir/audit.pretty" >/dev/null
+
 mkdir -p "$tmp_dir/config-hit"
 cp guardian.config.yaml "$tmp_dir/config-hit/guardian.config.yaml"
 printf 'export const x = (): void => { console.log(1); }\n' > "$tmp_dir/config-hit/a.ts"

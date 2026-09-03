@@ -1,12 +1,14 @@
 const std = @import("std");
 const analyzer = @import("analyzer.zig");
 const app = @import("app.zig");
+const audit = @import("audit.zig");
 const guardian_config = @import("config.zig");
 
 pub const AnalysisResult = analyzer.AnalysisResult;
 pub const BatchResult = app.BatchResult;
 pub const Config = guardian_config.Config;
 pub const FileInput = app.FileInput;
+pub const AuditOptions = audit.AuditOptions;
 pub const JsonOptions = analyzer.JsonOptions;
 pub const SeverityFilter = analyzer.SeverityFilter;
 
@@ -51,6 +53,18 @@ pub fn analyzeBatchJson(
     defer batch.deinit(allocator);
 
     return app.batchToJsonWithOptions(allocator, batch, options);
+}
+
+pub fn auditFolderJson(
+    allocator: std.mem.Allocator,
+    folder_path: []const u8,
+    config_path: ?[]const u8,
+    options: AuditOptions,
+) ![]u8 {
+    var result = try audit.analyzeFolderAudit(allocator, folder_path, config_path, options);
+    defer result.deinit(allocator);
+
+    return audit.auditToJson(allocator, result);
 }
 
 pub fn analyzeFolderJson(

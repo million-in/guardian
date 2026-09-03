@@ -7,6 +7,7 @@ const type_check = @import("analyzers/type_check.zig");
 const cohesion = @import("analyzers/cohesion.zig");
 const design = @import("analyzers/design.zig");
 const formatting = @import("analyzers/formatting.zig");
+const broad = @import("analyzers/broad.zig");
 
 const Language = types.Language;
 const Violation = types.Violation;
@@ -100,6 +101,11 @@ pub fn analyze(
     const design_v = try design.analyzeDesign(allocator, raw_lines, masked_lines, lang, cfg);
     try all.appendSlice(design_v);
     allocator.free(design_v);
+
+    // ── Runtime-risk and Clippy-like heuristic rules ──
+    const broad_v = try broad.analyzeBroadRules(allocator, raw_lines, masked_lines, lang, cfg);
+    try all.appendSlice(broad_v);
+    allocator.free(broad_v);
 
     // ── Formatting ──
     const fmt_v = try formatting.analyzeFormatting(allocator, raw_lines, lang, cfg);

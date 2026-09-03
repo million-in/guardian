@@ -31,6 +31,12 @@ char *guardian_analyze_folder_json(
     int severity_filter
 );
 
+char *guardian_audit_folder_json(
+    const char *folder_path,
+    const char *config_path,
+    int score_threshold
+);
+
 void guardian_free_string(char *value);
 
 #ifdef __cplusplus

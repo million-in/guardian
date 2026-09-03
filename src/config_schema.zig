@@ -144,6 +144,61 @@ pub const ZigRulesPatch = struct {
     extra_banned_patterns: ?[]const Pattern = null,
 };
 
+pub const AuditRules = struct {
+    warn_ignored_errors: bool = true,
+    warn_panic_paths: bool = true,
+    warn_debug_output: bool = true,
+    warn_risky_conversions: bool = true,
+    warn_broad_exceptions: bool = true,
+    warn_mutable_defaults: bool = true,
+    warn_floating_promises: bool = true,
+    warn_non_null_assertions: bool = true,
+    warn_unpaired_resources: bool = true,
+    warn_unpaired_locks: bool = true,
+    warn_async_in_loops: bool = true,
+    warn_eval: bool = true,
+    warn_shell_execution: bool = true,
+    warn_sql_string_building: bool = true,
+    warn_untested_public_api: bool = true,
+    score_threshold: u32 = 70,
+};
+
+pub const AuditRulesPatch = struct {
+    warn_ignored_errors: ?bool = null,
+    warn_panic_paths: ?bool = null,
+    warn_debug_output: ?bool = null,
+    warn_risky_conversions: ?bool = null,
+    warn_broad_exceptions: ?bool = null,
+    warn_mutable_defaults: ?bool = null,
+    warn_floating_promises: ?bool = null,
+    warn_non_null_assertions: ?bool = null,
+    warn_unpaired_resources: ?bool = null,
+    warn_unpaired_locks: ?bool = null,
+    warn_async_in_loops: ?bool = null,
+    warn_eval: ?bool = null,
+    warn_shell_execution: ?bool = null,
+    warn_sql_string_building: ?bool = null,
+    warn_untested_public_api: ?bool = null,
+    score_threshold: ?u32 = null,
+};
+
+pub const ProofCommand = struct {
+    name: []const u8,
+    argv: []const []const u8,
+    timeout_ms: u32 = 120000,
+    max_output_bytes: u32 = 65536,
+};
+
+pub const ProofReport = struct {
+    kind: []const u8,
+    path: []const u8,
+};
+
+pub const ProofConfig = struct {
+    commands: []const ProofCommand = &.{},
+    reports: []const ProofReport = &.{},
+};
+
 pub const Override = struct {
     path_prefixes: []const []const u8 = &.{},
     path_suffixes: []const []const u8 = &.{},
@@ -156,6 +211,7 @@ pub const Override = struct {
     python: PythonRulesPatch = .{},
     rust: RustRulesPatch = .{},
     zig: ZigRulesPatch = .{},
+    audit: AuditRulesPatch = .{},
 
     pub fn matches(self: Override, file_path: []const u8) bool {
         if (self.path_prefixes.len > 0 and !config_paths.matchesAnyPrefix(file_path, self.path_prefixes)) {
@@ -192,6 +248,8 @@ pub const Config = struct {
         .extra_banned_patterns = &.{},
     },
     zig: ZigRules,
+    audit: AuditRules = .{},
+    proof: ProofConfig = .{},
     overrides: []const Override = &.{},
 
     pub fn isSupportedPath(self: Config, path: []const u8) bool {
@@ -222,6 +280,7 @@ pub const Config = struct {
             applyPythonPatch(&resolved.python, override_cfg.python);
             applyRustPatch(&resolved.rust, override_cfg.rust);
             applyZigPatch(&resolved.zig, override_cfg.zig);
+            applyAuditPatch(&resolved.audit, override_cfg.audit);
         }
 
         return resolved;
@@ -260,6 +319,29 @@ fn applyLimitsPatch(target: *Limits, patch: LimitsPatch) void {
         "max_excerpt_chars",
     }) |field_name| {
         applyOptionalField(Limits, LimitsPatch, target, patch, field_name);
+    }
+}
+
+fn applyAuditPatch(target: *AuditRules, patch: AuditRulesPatch) void {
+    inline for (.{
+        "warn_ignored_errors",
+        "warn_panic_paths",
+        "warn_debug_output",
+        "warn_risky_conversions",
+        "warn_broad_exceptions",
+        "warn_mutable_defaults",
+        "warn_floating_promises",
+        "warn_non_null_assertions",
+        "warn_unpaired_resources",
+        "warn_unpaired_locks",
+        "warn_async_in_loops",
+        "warn_eval",
+        "warn_shell_execution",
+        "warn_sql_string_building",
+        "warn_untested_public_api",
+        "score_threshold",
+    }) |field_name| {
+        applyOptionalField(AuditRules, AuditRulesPatch, target, patch, field_name);
     }
 }
 

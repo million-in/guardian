@@ -10,7 +10,7 @@ These files are test fixtures for the Guardian CLI and ABI engine.
 - `py_clean.py`: should pass or produce no `error` violations.
 - `py_bad.py`: should fail on `Any`, bare `dict` and `list`, missing return type, and deep nesting.
 - `rs_clean.rs`: should pass or produce no `error` violations.
-- `rs_bad.rs`: should fail design limits and warn on `unsafe`, `unwrap`, `expect`, and `todo!`.
+- `rs_bad.rs`: should fail design limits and warn on `unsafe`, `unwrap`, `expect`, `todo!`, and broad runtime-risk patterns such as panic/debug output.
 - `zig_clean.zig`: should pass or produce no `error` violations.
 - `zig_bad.zig`: should fail on deep nesting and warn on `anytype` and `@intCast`.
 
@@ -36,6 +36,12 @@ Quick CLI folder test:
 
 ```zsh
 ./zig-out/bin/gd folder samples --json | jq .
+```
+
+Quick project audit test:
+
+```zsh
+./zig-out/bin/gd audit samples --raw-json | jq '.score.overall, .proof_status'
 ```
 
 Config override example:

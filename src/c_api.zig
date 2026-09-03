@@ -52,6 +52,23 @@ pub export fn guardian_analyze_folder_json(
     return ownedCString(json);
 }
 
+pub export fn guardian_audit_folder_json(
+    folder_path: [*:0]const u8,
+    config_path: ?[*:0]const u8,
+    score_threshold: c_int,
+) ?[*:0]u8 {
+    const threshold: ?u32 = if (score_threshold > 0) @intCast(score_threshold) else null;
+    const json = guardian.auditFolderJson(
+        std.heap.c_allocator,
+        std.mem.span(folder_path),
+        optionalSpan(config_path),
+        .{ .run_proofs = false, .score_threshold = threshold },
+    ) catch |err| return errorCString(err);
+    defer std.heap.c_allocator.free(json);
+
+    return ownedCString(json);
+}
+
 pub export fn guardian_free_string(value: ?[*:0]u8) void {
     const ptr = value orelse return;
     std.heap.c_allocator.free(std.mem.span(ptr));

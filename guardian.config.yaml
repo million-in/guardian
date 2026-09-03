@@ -60,6 +60,30 @@ zig:
     - pattern: "page_allocator"
       severity: "warn"
       message: "page_allocator should not be used in production hot paths"
+audit:
+  warn_ignored_errors: true
+  warn_panic_paths: true
+  warn_debug_output: true
+  warn_risky_conversions: true
+  warn_broad_exceptions: true
+  warn_mutable_defaults: true
+  warn_floating_promises: true
+  warn_non_null_assertions: true
+  warn_unpaired_resources: true
+  warn_unpaired_locks: true
+  warn_async_in_loops: true
+  warn_eval: true
+  warn_shell_execution: true
+  warn_sql_string_building: true
+  warn_untested_public_api: true
+  score_threshold: 70
+proof:
+  commands:
+    - name: unit
+      argv: ["zig", "build", "test", "--summary", "all"]
+      timeout_ms: 120000
+      max_output_bytes: 65536
+  reports: []
 overrides:
   - path_prefixes: ["src/analyzers/", "src/protocol/"]
     limits:
@@ -109,6 +133,16 @@ overrides:
     limits:
       max_function_arguments: 6
       max_functions_per_file: 32
+      cyclomatic_complexity_warn: 10
+      cyclomatic_complexity_error: 14
+  - path_suffixes: ["src/audit.zig"]
+    limits:
+      max_function_arguments: 8
+      max_functions_per_file: 48
+      max_hidden_touch_excess: 10
+      cyclomatic_complexity_warn: 12
+      cyclomatic_complexity_error: 18
+      max_line_length: 160
   - path_suffixes: ["src/root.zig", "src/yaml_config.zig", "src/types.zig"]
     limits:
       max_function_arguments: 8
@@ -132,3 +166,6 @@ overrides:
       ban_generics: false
     zig:
       warn_anytype: false
+    audit:
+      warn_debug_output: false
+      warn_panic_paths: false

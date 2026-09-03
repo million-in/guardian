@@ -1,6 +1,7 @@
 const std = @import("std");
 const analyzer = @import("analyzer.zig");
 const app = @import("app.zig");
+const audit = @import("audit.zig");
 const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
 
@@ -8,10 +9,14 @@ const CliOptions = struct {
     json_output: bool = false,
     raw_json_output: bool = false,
     config_path: ?[]const u8 = null,
+    run_proofs: bool = false,
+    score_threshold: ?u32 = null,
+    proof_reports: std.array_list.Managed([]const u8),
 };
 
 const Command = enum {
     analyze,
+    audit,
     batch,
     folder,
     help,
@@ -36,26 +41,57 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
 
     switch (command) {
         .help => return writeUsage(&stdout.interface),
-        .analyze, .batch, .folder => {},
+        .analyze, .audit, .batch, .folder => {},
     }
 
-    const parsed = try parseCliOptions(allocator, args[1..]);
-    defer parsed.positionals.deinit();
+    var parsed = try parseCliOptions(allocator, args[1..]);
+    defer parsed.deinit();
 
     const output_mode = resolveOutputMode(stdout_file, parsed.options);
 
     switch (command) {
         .analyze => try runAnalyzeCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
+        .audit => try runAuditCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .batch => try runBatchCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .folder => try runFolderCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .help => unreachable,
     }
 }
 
+fn runAuditCommand(
+    allocator: std.mem.Allocator,
+    stdout: anytype,
+    stderr: anytype,
+    parsed: ParsedCli,
+    output_mode: OutputMode,
+) !void {
+    if (parsed.positionals.items.len != 1) {
+        try writeUsage(stderr);
+        return error.InvalidArguments;
+    }
+
+    const folder_path = parsed.positionals.items[0];
+    var result = try audit.analyzeFolderAudit(allocator, folder_path, parsed.options.config_path, .{
+        .run_proofs = parsed.options.run_proofs,
+        .score_threshold = parsed.options.score_threshold,
+        .extra_proof_reports = parsed.options.proof_reports.items,
+    });
+    defer result.deinit(allocator);
+
+    const output = if (output_mode == .json)
+        try audit.auditToJson(allocator, result)
+    else
+        try audit.auditToPretty(allocator, result);
+    defer allocator.free(output);
+
+    try writeOutput(stdout, output, output_mode);
+}
+
 fn writeUsage(writer: anytype) !void {
     try writer.writeAll(
         \\Usage:
         \\  gd analyze <file> [--json] [--raw-json] [--config path]
+        \\  gd audit <dir> [--run-proofs] [--proof-report path] [--score-threshold n] [--json] [--raw-json] [--config path]
         \\  gd batch <file> <file> [...] [--json] [--raw-json] [--config path]
         \\  gd folder <dir> [--json] [--raw-json] [--config path]
         \\
@@ -64,6 +100,7 @@ fn writeUsage(writer: anytype) !void {
         \\  Use `--config path` to force a specific config file.
         \\  `--json` keeps human output on a terminal, but emits JSON when piped.
         \\  `--raw-json` always emits JSON.
+        \\  `audit --run-proofs` only runs argv commands explicitly configured in guardian.config.yaml.
         \\
     );
 }
@@ -189,12 +226,20 @@ fn resolveOutputMode(stdout_file: std.Io.File, options: CliOptions) OutputMode {
 const ParsedCli = struct {
     options: CliOptions,
     positionals: std.array_list.Managed([]const u8),
+
+    fn deinit(self: *ParsedCli) void {
+        self.positionals.deinit();
+        self.options.proof_reports.deinit();
+    }
 };
 
 fn parseCliOptions(allocator: std.mem.Allocator, args: []const [:0]u8) !ParsedCli {
-    var options = CliOptions{};
+    var options = CliOptions{ .proof_reports = std.array_list.Managed([]const u8).init(allocator) };
     var positionals = std.array_list.Managed([]const u8).init(allocator);
-    errdefer positionals.deinit();
+    errdefer {
+        positionals.deinit();
+        options.proof_reports.deinit();
+    }
 
     var idx: usize = 0;
     while (idx < args.len) : (idx += 1) {
@@ -215,6 +260,22 @@ fn parseCliOptions(allocator: std.mem.Allocator, args: []const [:0]u8) !ParsedCl
             options.config_path = args[idx];
             continue;
         }
+        if (std.mem.eql(u8, arg, "--run-proofs")) {
+            options.run_proofs = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--score-threshold")) {
+            idx += 1;
+            if (idx >= args.len) return error.InvalidArguments;
+            options.score_threshold = try std.fmt.parseInt(u32, args[idx], 10);
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--proof-report")) {
+            idx += 1;
+            if (idx >= args.len) return error.InvalidArguments;
+            try options.proof_reports.append(args[idx]);
+            continue;
+        }
         try positionals.append(arg);
     }
 
@@ -226,6 +287,7 @@ fn parseCliOptions(allocator: std.mem.Allocator, args: []const [:0]u8) !ParsedCl
 
 fn parseCommand(arg: []const u8) ?Command {
     if (std.mem.eql(u8, arg, "analyze")) return .analyze;
+    if (std.mem.eql(u8, arg, "audit")) return .audit;
     if (std.mem.eql(u8, arg, "batch")) return .batch;
     if (std.mem.eql(u8, arg, "folder")) return .folder;
     if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help")) return .help;

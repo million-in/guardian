@@ -31,6 +31,50 @@ pub const Severity = enum {
     }
 };
 
+pub const RuleCategory = enum {
+    correctness,
+    safety,
+    maintainability,
+    resource_lifecycle,
+    concurrency,
+    security,
+    testability,
+    formatting,
+
+    pub fn toString(self: RuleCategory) []const u8 {
+        return switch (self) {
+            .correctness => "correctness",
+            .safety => "safety",
+            .maintainability => "maintainability",
+            .resource_lifecycle => "resource_lifecycle",
+            .concurrency => "concurrency",
+            .security => "security",
+            .testability => "testability",
+            .formatting => "formatting",
+        };
+    }
+};
+
+pub const RuleConfidence = enum {
+    high,
+    medium,
+    low,
+
+    pub fn toString(self: RuleConfidence) []const u8 {
+        return switch (self) {
+            .high => "high",
+            .medium => "medium",
+            .low => "low",
+        };
+    }
+};
+
+pub const RuleMetadata = struct {
+    category: RuleCategory,
+    confidence: RuleConfidence,
+    weight: u8,
+};
+
 pub const Rule = enum {
     nesting_depth,
     cyclomatic_complexity,
@@ -49,6 +93,21 @@ pub const Rule = enum {
     trailing_whitespace,
     mixed_indent,
     function_too_long,
+    ignored_error,
+    panic_usage,
+    debug_output,
+    risky_conversion,
+    broad_exception,
+    mutable_default_argument,
+    floating_promise,
+    non_null_assertion,
+    unpaired_resource,
+    unpaired_lock,
+    async_in_loop,
+    eval_usage,
+    shell_execution,
+    sql_string_building,
+    untested_public_api,
 
     pub fn toString(self: Rule) []const u8 {
         return switch (self) {
@@ -69,6 +128,73 @@ pub const Rule = enum {
             .trailing_whitespace => "trailing_whitespace",
             .mixed_indent => "mixed_indent",
             .function_too_long => "function_too_long",
+            .ignored_error => "ignored_error",
+            .panic_usage => "panic_usage",
+            .debug_output => "debug_output",
+            .risky_conversion => "risky_conversion",
+            .broad_exception => "broad_exception",
+            .mutable_default_argument => "mutable_default_argument",
+            .floating_promise => "floating_promise",
+            .non_null_assertion => "non_null_assertion",
+            .unpaired_resource => "unpaired_resource",
+            .unpaired_lock => "unpaired_lock",
+            .async_in_loop => "async_in_loop",
+            .eval_usage => "eval_usage",
+            .shell_execution => "shell_execution",
+            .sql_string_building => "sql_string_building",
+            .untested_public_api => "untested_public_api",
+        };
+    }
+
+    pub fn metadata(self: Rule) RuleMetadata {
+        return switch (self) {
+            .nesting_depth,
+            .cyclomatic_complexity,
+            .low_cohesion,
+            .high_coupling,
+            .too_many_arguments,
+            .too_many_fields,
+            .hidden_coupling,
+            .temporal_coupling,
+            .boolean_state_machine,
+            .ambiguous_lifecycle_ownership,
+            .function_too_long,
+            => .{ .category = .maintainability, .confidence = .high, .weight = 4 },
+
+            .inconsistent_indent,
+            .line_too_long,
+            .trailing_whitespace,
+            .mixed_indent,
+            => .{ .category = .formatting, .confidence = .high, .weight = 1 },
+
+            .banned_type,
+            .generic_usage,
+            => .{ .category = .safety, .confidence = .high, .weight = 5 },
+
+            .ignored_error,
+            .panic_usage,
+            .risky_conversion,
+            .broad_exception,
+            .mutable_default_argument,
+            .floating_promise,
+            .non_null_assertion,
+            => .{ .category = .correctness, .confidence = .medium, .weight = 6 },
+
+            .debug_output,
+            .untested_public_api,
+            => .{ .category = .testability, .confidence = .medium, .weight = 3 },
+
+            .unpaired_resource,
+            => .{ .category = .resource_lifecycle, .confidence = .medium, .weight = 7 },
+
+            .unpaired_lock,
+            .async_in_loop,
+            => .{ .category = .concurrency, .confidence = .medium, .weight = 7 },
+
+            .eval_usage,
+            .shell_execution,
+            .sql_string_building,
+            => .{ .category = .security, .confidence = .high, .weight = 8 },
         };
     }
 };
