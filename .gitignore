@@ -25,3 +25,7 @@ progress.md
 
 # Delta runtime ledger is local state; commit Delta project config, not ledger events.
 .delta/ledger/
+
+# Local release packaging output; build with scripts/package-release.sh, do not commit.
+dist/
+*.tar.gz
