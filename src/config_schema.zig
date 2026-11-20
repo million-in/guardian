@@ -79,6 +79,12 @@ pub const RustRules = struct {
     warn_unwrap: bool,
     warn_expect: bool,
     warn_todo: bool,
+    warn_unwrap_err: bool = true,
+    warn_transmute: bool = true,
+    warn_static_mut: bool = true,
+    warn_raw_pointer: bool = true,
+    warn_allow: bool = true,
+    warn_box_leak: bool = true,
     extra_banned_patterns: []const Pattern,
 };
 
@@ -87,6 +93,12 @@ pub const RustRulesPatch = struct {
     warn_unwrap: ?bool = null,
     warn_expect: ?bool = null,
     warn_todo: ?bool = null,
+    warn_unwrap_err: ?bool = null,
+    warn_transmute: ?bool = null,
+    warn_static_mut: ?bool = null,
+    warn_raw_pointer: ?bool = null,
+    warn_allow: ?bool = null,
+    warn_box_leak: ?bool = null,
     extra_banned_patterns: ?[]const Pattern = null,
 };
 
@@ -245,6 +257,12 @@ pub const Config = struct {
         .warn_unwrap = true,
         .warn_expect = true,
         .warn_todo = true,
+        .warn_unwrap_err = true,
+        .warn_transmute = true,
+        .warn_static_mut = true,
+        .warn_raw_pointer = true,
+        .warn_allow = true,
+        .warn_box_leak = true,
         .extra_banned_patterns = &.{},
     },
     zig: ZigRules,
@@ -351,6 +369,12 @@ fn applyRustPatch(target: *RustRules, patch: RustRulesPatch) void {
         "warn_unwrap",
         "warn_expect",
         "warn_todo",
+        "warn_unwrap_err",
+        "warn_transmute",
+        "warn_static_mut",
+        "warn_raw_pointer",
+        "warn_allow",
+        "warn_box_leak",
         "extra_banned_patterns",
     }) |field_name| {
         applyOptionalField(RustRules, RustRulesPatch, target, patch, field_name);

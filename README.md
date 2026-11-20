@@ -97,7 +97,7 @@ Language-specific defaults:
 | Go | `interface{}`, `map[string]interface{}`, unchecked type assertions, configurable generics |
 | TypeScript | `any`, `as any`, `@ts-ignore`, `@ts-expect-error` warnings |
 | Python | `Any`, `# type: ignore`, bare `dict`/`list`, missing public return annotation |
-| Rust | `unsafe`, `.unwrap()`, `.expect()`, `todo!()`, `unimplemented!()` warnings |
+| Rust | `unsafe`, `.unwrap()`, `.expect()`, `.unwrap_err()`, `todo!()`, `unimplemented!()`, `transmute`, `static mut`, raw pointers (`*const`/`*mut`), `#[allow(...)]` suppressions, `Box::leak` warnings |
 | Zig | `anytype` in public signatures, `@ptrCast`, `@intCast` warnings |
 
 Extra banned patterns can be configured per language and are checked after comment/string masking.
@@ -162,6 +162,12 @@ rust:
   warn_unwrap: true
   warn_expect: true
   warn_todo: true
+  warn_unwrap_err: true
+  warn_transmute: true
+  warn_static_mut: true
+  warn_raw_pointer: true
+  warn_allow: true
+  warn_box_leak: true
 audit:
   warn_ignored_errors: true
   warn_unpaired_resources: true

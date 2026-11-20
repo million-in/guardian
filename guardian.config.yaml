@@ -49,6 +49,12 @@ rust:
   warn_unwrap: true
   warn_expect: true
   warn_todo: true
+  warn_unwrap_err: true
+  warn_transmute: true
+  warn_static_mut: true
+  warn_raw_pointer: true
+  warn_allow: true
+  warn_box_leak: true
   extra_banned_patterns: []
 zig:
   warn_ptr_cast: true

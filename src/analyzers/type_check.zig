@@ -65,6 +65,29 @@ fn analyzeRustTypes(
             try appendRustCallViolations(line, line_no, "todo!(", "todo!() should not ship in production code", violations);
             try appendRustCallViolations(line, line_no, "unimplemented!(", "unimplemented!() should not ship in production code", violations);
         }
+        if (cfg.rust.warn_unwrap_err) {
+            try appendRustCallViolations(line, line_no, ".unwrap_err(", "unwrap_err() can panic — handle the Ok case explicitly", violations);
+        }
+        if (cfg.rust.warn_transmute) {
+            try appendRustCallViolations(line, line_no, "transmute(", "transmute reinterprets bits without type checks — prefer safe conversions", violations);
+            try appendRustCallViolations(line, line_no, "transmute::<", "transmute reinterprets bits without type checks — prefer safe conversions", violations);
+            try appendRustCallViolations(line, line_no, "transmute_copy(", "transmute_copy reinterprets bits without type checks — prefer safe conversions", violations);
+            try appendRustCallViolations(line, line_no, "transmute_copy::<", "transmute_copy reinterprets bits without type checks — prefer safe conversions", violations);
+        }
+        if (cfg.rust.warn_static_mut) {
+            try appendRustCallViolations(line, line_no, "static mut ", "static mut is a data-race risk — use a Mutex, RwLock, or atomic instead", violations);
+        }
+        if (cfg.rust.warn_raw_pointer) {
+            try appendRustCallViolations(line, line_no, "*const ", "raw pointer must be isolated behind a safe abstraction and documented", violations);
+            try appendRustCallViolations(line, line_no, "*mut ", "raw pointer must be isolated behind a safe abstraction and documented", violations);
+        }
+        if (cfg.rust.warn_allow) {
+            try appendRustCallViolations(line, line_no, "#[allow(", "#[allow(...)] suppresses a lint — document why it is necessary", violations);
+            try appendRustCallViolations(line, line_no, "#![allow(", "#![allow(...)] suppresses a lint crate-wide — document why it is necessary", violations);
+        }
+        if (cfg.rust.warn_box_leak) {
+            try appendRustCallViolations(line, line_no, "Box::leak(", "Box::leak intentionally leaks memory — document the bounded lifetime", violations);
+        }
     }
 }
 
@@ -1238,6 +1261,67 @@ test "types: warns on public Zig anytype with public-only scope" {
     const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .zig_lang, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expect(v.len > 0);
+}
+
+test "types: warns on new Rust footguns and respects disabling them" {
+    const src =
+        \\\\static mut COUNTER: u32 = 0;
+        \\\\#[allow(dead_code)]
+        \\\\pub fn risky(raw: *mut u8, ok: Result<u8, E>) -> u32 {
+        \\\\    let err = ok.unwrap_err();
+        \\\\    let leaked = Box::leak(Box::new(1u8));
+        \\\\    unsafe { std::mem::transmute::<u32, f32>(42) }
+        \\\\}
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .rust);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .rust, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    // unsafe, static mut, allow, raw pointer, unwrap_err, Box::leak, transmute
+    try testing.expectEqual(@as(usize, 7), v.len);
+
+    var disabled = loaded.value;
+    disabled.rust.warn_unwrap_err = false;
+    disabled.rust.warn_transmute = false;
+    disabled.rust.warn_static_mut = false;
+    disabled.rust.warn_raw_pointer = false;
+    disabled.rust.warn_allow = false;
+    disabled.rust.warn_box_leak = false;
+    const v2 = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .rust, disabled);
+    defer types.freeViolations(testing.allocator, v2);
+    try testing.expectEqual(@as(usize, 1), v2.len);
+}
+
+test "types: ignores Rust footguns in strings and comments" {
+    const src =
+        \\\\pub fn clean() {
+        \\\\    let s = "static mut x; value.unwrap()";
+        \\\\    // std::mem::transmute::<u32, f32>(x) and Box::leak(b)
+        \\\\}
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .rust);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .rust, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    try testing.expectEqual(@as(usize, 0), v.len);
 }
 
 fn countRule(violations: []const Violation, rule: Rule) usize {
