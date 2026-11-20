@@ -45,10 +45,11 @@ python:
   warn_missing_return_annotation: true
   extra_banned_patterns: []
 rust:
-  warn_unsafe: true
+  ban_unsafe: true
+  ban_dangerous_macros: true
+  ban_clone: true
   warn_unwrap: true
   warn_expect: true
-  warn_todo: true
   warn_unwrap_err: true
   warn_transmute: true
   warn_static_mut: true

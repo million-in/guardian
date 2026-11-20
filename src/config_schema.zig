@@ -75,10 +75,11 @@ pub const GoRulesPatch = struct {
 };
 
 pub const RustRules = struct {
-    warn_unsafe: bool,
+    ban_unsafe: bool = true,
+    ban_dangerous_macros: bool = true,
+    ban_clone: bool = true,
     warn_unwrap: bool,
     warn_expect: bool,
-    warn_todo: bool,
     warn_unwrap_err: bool = true,
     warn_transmute: bool = true,
     warn_static_mut: bool = true,
@@ -89,10 +90,11 @@ pub const RustRules = struct {
 };
 
 pub const RustRulesPatch = struct {
-    warn_unsafe: ?bool = null,
+    ban_unsafe: ?bool = null,
+    ban_dangerous_macros: ?bool = null,
+    ban_clone: ?bool = null,
     warn_unwrap: ?bool = null,
     warn_expect: ?bool = null,
-    warn_todo: ?bool = null,
     warn_unwrap_err: ?bool = null,
     warn_transmute: ?bool = null,
     warn_static_mut: ?bool = null,
@@ -253,10 +255,11 @@ pub const Config = struct {
     typescript: TypeScriptRules,
     python: PythonRules,
     rust: RustRules = .{
-        .warn_unsafe = true,
+        .ban_unsafe = true,
+        .ban_dangerous_macros = true,
+        .ban_clone = true,
         .warn_unwrap = true,
         .warn_expect = true,
-        .warn_todo = true,
         .warn_unwrap_err = true,
         .warn_transmute = true,
         .warn_static_mut = true,
@@ -365,10 +368,11 @@ fn applyAuditPatch(target: *AuditRules, patch: AuditRulesPatch) void {
 
 fn applyRustPatch(target: *RustRules, patch: RustRulesPatch) void {
     inline for (.{
-        "warn_unsafe",
+        "ban_unsafe",
+        "ban_dangerous_macros",
+        "ban_clone",
         "warn_unwrap",
         "warn_expect",
-        "warn_todo",
         "warn_unwrap_err",
         "warn_transmute",
         "warn_static_mut",

@@ -57,3 +57,12 @@ pub fn risky_conversions(raw: *mut u8, value: Result<u8, Error>) -> f32 {
     let leaked = Box::leak(Box::new(1u8));
     unsafe { std::mem::transmute::<u32, f32>(42) }
 }
+
+pub fn banned_constructs(name: String) -> String {
+    let copy = name.clone();
+    dbg!(copy);
+    if copy.is_empty() {
+        panic!("name is required");
+    }
+    copy
+}

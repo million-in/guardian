@@ -52,41 +52,49 @@ fn analyzeRustTypes(
 ) !void {
     for (masked_lines, 0..) |line, line_idx| {
         const line_no = @as(u32, @intCast(line_idx)) + 1;
-        if (cfg.rust.warn_unsafe) {
-            try appendRustWordViolations(line, line_no, "unsafe", "unsafe Rust must be isolated and documented", violations);
+        if (cfg.rust.ban_unsafe) {
+            try appendRustWordViolations(line, line_no, "unsafe", "unsafe Rust is banned — use safe Rust or a reviewed FFI boundary crate", .@"error", violations);
+        }
+        if (cfg.rust.ban_dangerous_macros) {
+            try appendRustCallViolations(line, line_no, "panic!(", "panic!() is banned — return an error instead", .@"error", violations);
+            try appendRustCallViolations(line, line_no, "unreachable!(", "unreachable!() is banned — model the state so this branch cannot exist", .@"error", violations);
+            try appendRustCallViolations(line, line_no, "todo!(", "todo!() is banned — finish the path or return an error", .@"error", violations);
+            try appendRustCallViolations(line, line_no, "unimplemented!(", "unimplemented!() is banned — finish the path or return an error", .@"error", violations);
+            try appendRustCallViolations(line, line_no, "dbg!(", "dbg!() is banned — use structured logging or tracing", .@"error", violations);
+        }
+        if (cfg.rust.ban_clone) {
+            try appendRustCallViolations(line, line_no, ".clone(", "clone() is banned — borrow, move, or restructure ownership instead", .@"error", violations);
+            try appendRustCallViolations(line, line_no, ".clone_from(", "clone_from() is banned — borrow, move, or restructure ownership instead", .@"error", violations);
+            try appendRustCallViolations(line, line_no, "Clone::clone(", "Clone::clone() is banned — borrow, move, or restructure ownership instead", .@"error", violations);
         }
         if (cfg.rust.warn_unwrap) {
-            try appendRustCallViolations(line, line_no, ".unwrap(", "unwrap() can panic — handle the error explicitly", violations);
+            try appendRustCallViolations(line, line_no, ".unwrap(", "unwrap() can panic — handle the error explicitly", .warn, violations);
         }
         if (cfg.rust.warn_expect) {
-            try appendRustCallViolations(line, line_no, ".expect(", "expect() can panic — include a recovery path or strong invariant", violations);
-        }
-        if (cfg.rust.warn_todo) {
-            try appendRustCallViolations(line, line_no, "todo!(", "todo!() should not ship in production code", violations);
-            try appendRustCallViolations(line, line_no, "unimplemented!(", "unimplemented!() should not ship in production code", violations);
+            try appendRustCallViolations(line, line_no, ".expect(", "expect() can panic — include a recovery path or strong invariant", .warn, violations);
         }
         if (cfg.rust.warn_unwrap_err) {
-            try appendRustCallViolations(line, line_no, ".unwrap_err(", "unwrap_err() can panic — handle the Ok case explicitly", violations);
+            try appendRustCallViolations(line, line_no, ".unwrap_err(", "unwrap_err() can panic — handle the Ok case explicitly", .warn, violations);
         }
         if (cfg.rust.warn_transmute) {
-            try appendRustCallViolations(line, line_no, "transmute(", "transmute reinterprets bits without type checks — prefer safe conversions", violations);
-            try appendRustCallViolations(line, line_no, "transmute::<", "transmute reinterprets bits without type checks — prefer safe conversions", violations);
-            try appendRustCallViolations(line, line_no, "transmute_copy(", "transmute_copy reinterprets bits without type checks — prefer safe conversions", violations);
-            try appendRustCallViolations(line, line_no, "transmute_copy::<", "transmute_copy reinterprets bits without type checks — prefer safe conversions", violations);
+            try appendRustCallViolations(line, line_no, "transmute(", "transmute reinterprets bits without type checks — prefer safe conversions", .warn, violations);
+            try appendRustCallViolations(line, line_no, "transmute::<", "transmute reinterprets bits without type checks — prefer safe conversions", .warn, violations);
+            try appendRustCallViolations(line, line_no, "transmute_copy(", "transmute_copy reinterprets bits without type checks — prefer safe conversions", .warn, violations);
+            try appendRustCallViolations(line, line_no, "transmute_copy::<", "transmute_copy reinterprets bits without type checks — prefer safe conversions", .warn, violations);
         }
         if (cfg.rust.warn_static_mut) {
-            try appendRustCallViolations(line, line_no, "static mut ", "static mut is a data-race risk — use a Mutex, RwLock, or atomic instead", violations);
+            try appendRustCallViolations(line, line_no, "static mut ", "static mut is a data-race risk — use a Mutex, RwLock, or atomic instead", .warn, violations);
         }
         if (cfg.rust.warn_raw_pointer) {
-            try appendRustCallViolations(line, line_no, "*const ", "raw pointer must be isolated behind a safe abstraction and documented", violations);
-            try appendRustCallViolations(line, line_no, "*mut ", "raw pointer must be isolated behind a safe abstraction and documented", violations);
+            try appendRustCallViolations(line, line_no, "*const ", "raw pointer must be isolated behind a safe abstraction and documented", .warn, violations);
+            try appendRustCallViolations(line, line_no, "*mut ", "raw pointer must be isolated behind a safe abstraction and documented", .warn, violations);
         }
         if (cfg.rust.warn_allow) {
-            try appendRustCallViolations(line, line_no, "#[allow(", "#[allow(...)] suppresses a lint — document why it is necessary", violations);
-            try appendRustCallViolations(line, line_no, "#![allow(", "#![allow(...)] suppresses a lint crate-wide — document why it is necessary", violations);
+            try appendRustCallViolations(line, line_no, "#[allow(", "#[allow(...)] suppresses a lint — document why it is necessary", .warn, violations);
+            try appendRustCallViolations(line, line_no, "#![allow(", "#![allow(...)] suppresses a lint crate-wide — document why it is necessary", .warn, violations);
         }
         if (cfg.rust.warn_box_leak) {
-            try appendRustCallViolations(line, line_no, "Box::leak(", "Box::leak intentionally leaks memory — document the bounded lifetime", violations);
+            try appendRustCallViolations(line, line_no, "Box::leak(", "Box::leak intentionally leaks memory — document the bounded lifetime", .warn, violations);
         }
     }
 }
@@ -96,12 +104,13 @@ fn appendRustWordViolations(
     line_no: u32,
     word: []const u8,
     message: []const u8,
+    severity: Severity,
     violations: *ViolationList,
 ) !void {
     var search_pos: usize = 0;
     while (std.mem.indexOfPos(u8, line, search_pos, word)) |col| {
         if (hasTokenBoundary(line, col, word.len)) {
-            try appendStaticViolation(violations, line_no, @intCast(col), .banned_type, .warn, message);
+            try appendStaticViolation(violations, line_no, @intCast(col), .banned_type, severity, message);
         }
         search_pos = col + word.len;
     }
@@ -112,11 +121,12 @@ fn appendRustCallViolations(
     line_no: u32,
     needle: []const u8,
     message: []const u8,
+    severity: Severity,
     violations: *ViolationList,
 ) !void {
     var search_pos: usize = 0;
     while (std.mem.indexOfPos(u8, line, search_pos, needle)) |col| {
-        try appendStaticViolation(violations, line_no, @intCast(col), .banned_type, .warn, message);
+        try appendStaticViolation(violations, line_no, @intCast(col), .banned_type, severity, message);
         search_pos = col + needle.len;
     }
 }
@@ -1322,6 +1332,44 @@ test "types: ignores Rust footguns in strings and comments" {
     const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .rust, loaded.value);
     defer types.freeViolations(testing.allocator, v);
     try testing.expectEqual(@as(usize, 0), v.len);
+}
+
+test "types: bans Rust unsafe, dangerous macros, and clone as errors" {
+    const src =
+        \\\\pub fn banned(value: String) -> String {
+        \\\\    let copy = value.clone();
+        \\\\    let other = Clone::clone(&value);
+        \\\\    dbg!(copy);
+        \\\\    if copy.is_empty() { panic!("empty"); }
+        \\\\    unsafe { std::hint::unreachable_unchecked() }
+        \\\\}
+    ;
+    const raw_lines = try types.splitLines(testing.allocator, src);
+    defer testing.allocator.free(raw_lines);
+
+    const masked_source = try types.maskSource(testing.allocator, src, .rust);
+    defer testing.allocator.free(masked_source);
+    const masked_lines = try types.splitLines(testing.allocator, masked_source);
+    defer testing.allocator.free(masked_lines);
+
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+
+    const v = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .rust, loaded.value);
+    defer types.freeViolations(testing.allocator, v);
+    // .clone(), Clone::clone(), dbg!(), panic!(), unsafe
+    try testing.expectEqual(@as(usize, 5), v.len);
+    for (v) |violation| {
+        try testing.expectEqual(Severity.@"error", violation.severity);
+    }
+
+    var disabled = loaded.value;
+    disabled.rust.ban_unsafe = false;
+    disabled.rust.ban_dangerous_macros = false;
+    disabled.rust.ban_clone = false;
+    const v2 = try analyzeTypes(testing.allocator, raw_lines, masked_lines, .rust, disabled);
+    defer types.freeViolations(testing.allocator, v2);
+    try testing.expectEqual(@as(usize, 0), v2.len);
 }
 
 fn countRule(violations: []const Violation, rule: Rule) usize {

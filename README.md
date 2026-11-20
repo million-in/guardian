@@ -97,7 +97,7 @@ Language-specific defaults:
 | Go | `interface{}`, `map[string]interface{}`, unchecked type assertions, configurable generics |
 | TypeScript | `any`, `as any`, `@ts-ignore`, `@ts-expect-error` warnings |
 | Python | `Any`, `# type: ignore`, bare `dict`/`list`, missing public return annotation |
-| Rust | `unsafe`, `.unwrap()`, `.expect()`, `.unwrap_err()`, `todo!()`, `unimplemented!()`, `transmute`, `static mut`, raw pointers (`*const`/`*mut`), `#[allow(...)]` suppressions, `Box::leak` warnings |
+| Rust | Banned (error): `unsafe`, dangerous macros (`panic!()`, `unreachable!()`, `todo!()`, `unimplemented!()`, `dbg!()`), `.clone()`/`.clone_from()`/`Clone::clone()`. Warnings: `.unwrap()`, `.expect()`, `.unwrap_err()`, `transmute`, `static mut`, raw pointers (`*const`/`*mut`), `#[allow(...)]` suppressions, `Box::leak` |
 | Zig | `anytype` in public signatures, `@ptrCast`, `@intCast` warnings |
 
 Extra banned patterns can be configured per language and are checked after comment/string masking.
@@ -110,7 +110,7 @@ Guardian now includes Clippy-like source heuristics that flag likely functional 
 - Resource lifecycle issues such as `open()` without `with`, allocator operations without nearby `defer`, and `mem::forget`
 - Concurrency footguns such as goroutines/tasks launched in loops and locks without nearby defer cleanup
 - Security footguns such as `eval`, `exec`, `new Function`, `shell=True`, and dynamic SQL assembly
-- Debug/testability signals such as `dbg!`, `println!`, and `std.debug.print` in non-sample code
+- Debug/testability signals such as `println!` and `std.debug.print` in non-sample code (`dbg!` is a banned Rust macro, above)
 
 Noisy checks are warning-only and can be disabled under the `audit` config section or path overrides.
 
@@ -158,10 +158,11 @@ scan:
   extensions: [".go", ".ts", ".tsx", ".py", ".rs", ".zig"]
   ignored_dirs: [".git", ".zig-cache", "zig-out", "node_modules", "vendor", "dist", "build", "__pycache__"]
 rust:
-  warn_unsafe: true
+  ban_unsafe: true
+  ban_dangerous_macros: true
+  ban_clone: true
   warn_unwrap: true
   warn_expect: true
-  warn_todo: true
   warn_unwrap_err: true
   warn_transmute: true
   warn_static_mut: true
