@@ -7,6 +7,8 @@ A fast static analysis engine for enforcing engineering discipline across polygl
 
 Guardian analyzes **Go**, **TypeScript**, **Python**, **Rust**, and **Zig** source files with configurable checks for nesting depth, cyclomatic complexity, type-safety footguns, cohesion, formatting, cross-language design smells, runtime-risk heuristics, and project health scoring.
 
+Full documentation is in the [project wiki](https://github.com/million-in/guardian/wiki). Start with the [Rust rules reference](https://github.com/million-in/guardian/wiki/Rust-Rules) and the [v0.3.0 migration guide](https://github.com/million-in/guardian/wiki/Migration-Guide) if you are upgrading from v0.2.x.
+
 ## Requirements
 
 - Zig `>= 0.16.0`
@@ -102,6 +104,32 @@ Language-specific defaults:
 
 Extra banned patterns can be configured per language and are checked after comment/string masking.
 
+### Rust Rules
+
+Rust checks run in the type-safety pass on masked source, so matches inside comments and strings are ignored. Each check is gated by a `rust:` config flag that defaults to `true` and can be disabled globally or per path (see [Configuration](#configuration)).
+
+| Config flag | Severity | Flags | Why |
+|---|---|---|---|
+| `ban_unsafe` | error | any `unsafe` | `unsafe` opts out of compiler-checked memory safety for the five unsafe superpowers ([The Rust Book, ch. 20](https://doc.rust-lang.org/stable/book/ch20-01-unsafe-rust.html)) |
+| `ban_dangerous_macros` | error | `panic!()`, `unreachable!()`, `todo!()`, `unimplemented!()`, `dbg!()` | Panicking/placeholder/debug macros must not ship; other macros (`vec!`, `format!`, `matches!`) stay allowed |
+| `ban_clone` | error | `.clone()`, `.clone_from()`, `Clone::clone()` | Explicit duplication hides ownership and allocation cost; borrow or move instead |
+| `warn_unwrap` | warn | `.unwrap()` | Panics on `None`/`Err` |
+| `warn_expect` | warn | `.expect()` | Panics on `None`/`Err` |
+| `warn_unwrap_err` | warn | `.unwrap_err()` | Panics on `Ok` |
+| `warn_transmute` | warn | `transmute` / `transmute_copy`, including `::<...>` forms | [`std::mem::transmute`](https://doc.rust-lang.org/stable/std/mem/fn.transmute.html) reinterprets bits with no validity check; misuse is undefined behavior |
+| `warn_static_mut` | warn | `static mut` | Mutable statics are a data-race risk; prefer `Mutex`, `RwLock`, or atomics |
+| `warn_raw_pointer` | warn | `*const`, `*mut` | Raw pointers have no validity or aliasing guarantees; isolate behind a safe abstraction |
+| `warn_allow` | warn | `#[allow(...)]`, `#![allow(...)]` | Lint suppressions must be deliberate and documented |
+| `warn_box_leak` | warn | `Box::leak()` | Intentionally leaks a box to get a `&'static mut`; the bounded lifetime must be documented |
+
+Notes and limitations:
+
+- Disabling `ban_dangerous_macros` silences Rust panic/debug-macro reporting entirely; there is no warn-level fallback. `println!`/`eprintln!` remain `audit.warn_debug_output` warnings.
+- Matching is heuristic and text-based (no parser, by design). Forms with unusual spacing or bracket invocation, such as `panic! (` or `todo![]`, are not matched.
+- FFI or low-level crates that legitimately need a banned construct should disable the flag for those paths with a per-path override rather than project-wide.
+
+Worked examples: `samples/rs_bad.rs` fails with errors, `samples/rs_clean.rs` passes clean.
+
 ### Broad Runtime-Risk Heuristics
 
 Guardian now includes Clippy-like source heuristics that flag likely functional risk without Tree-sitter or LSP:
@@ -185,6 +213,8 @@ proof:
 
 Per-path overrides can match `path_prefixes`, `path_suffixes`, `path_contains`, `extensions`, and detected `roles` (`test`, `fixture`, `sample`, `generated`). Later overrides win.
 
+**Upgrading from v0.2.x (breaking):** the Rust config keys `warn_unsafe` and `warn_todo` were renamed to `ban_unsafe` and `ban_dangerous_macros` in v0.3.0. The config loader rejects unknown fields, so a config still using the old keys fails to load with `error.UnknownField`; rename them (and optionally drop keys you leave at the `true` default). See the [migration guide](https://github.com/million-in/guardian/wiki/Migration-Guide).
+
 ## Output Formats
 
 Single-file JSON:
@@ -232,7 +262,7 @@ Create a local release package:
 bash ./scripts/package-release.sh
 ```
 
-Release archives contain `bin/gd`, `lib/libguardian.*`, `include/guardian.h`, `guardian.config.yaml`, `README.md`, `SPEC.md`, `DELTA.md`, and `LICENSE`.
+Release archives contain `bin/gd`, `lib/libguardian.*`, `include/guardian.h`, `guardian.config.yaml`, `README.md`, `CHANGELOG.md`, `SPEC.md`, `DELTA.md`, and `LICENSE`.
 
 Guardian does not ship MCP servers, plugins, or skills. Use it through `gd` or the ABI.
 

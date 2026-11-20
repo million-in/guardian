@@ -38,6 +38,6 @@ mkdir -p "$archive_root/bin" "$archive_root/include" "$archive_root/lib"
 cp zig-out/bin/gd "$archive_root/bin/"
 cp zig-out/lib/libguardian.* "$archive_root/lib/"
 cp include/guardian.h "$archive_root/include/"
-cp README.md SPEC.md DELTA.md guardian.config.yaml LICENSE "$archive_root/"
+cp README.md CHANGELOG.md SPEC.md DELTA.md guardian.config.yaml LICENSE "$archive_root/"
 
 tar -czf "$archive_name" -C dist "code-guardian-$platform"

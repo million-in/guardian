@@ -26,6 +26,7 @@ package_root="$extract_root/code-guardian-$platform"
 # Verify expected files exist
 test -x "$package_root/bin/gd"
 test -f "$package_root/guardian.config.yaml"
+test -f "$package_root/CHANGELOG.md"
 test -f "$package_root/SPEC.md"
 test -f "$package_root/DELTA.md"
 test -f "$package_root/include/guardian.h"
