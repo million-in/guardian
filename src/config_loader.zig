@@ -325,10 +325,11 @@ test "config loader: rejects unknown fields" {
         \\    "extra_banned_patterns": []
         \\  },
         \\  "rust": {
-        \\    "warn_unsafe": true,
+        \\    "ban_unsafe": true,
+        \\    "ban_dangerous_macros": true,
+        \\    "ban_clone": true,
         \\    "warn_unwrap": true,
         \\    "warn_expect": true,
-        \\    "warn_todo": true,
         \\    "extra_banned_patterns": []
         \\  },
         \\  "zig": {
@@ -398,10 +399,11 @@ test "config loader: rejects unknown fields from yaml" {
         \\  warn_missing_return_annotation: true
         \\  extra_banned_patterns: []
         \\rust:
-        \\  warn_unsafe: true
+        \\  ban_unsafe: true
+        \\  ban_dangerous_macros: true
+        \\  ban_clone: true
         \\  warn_unwrap: true
         \\  warn_expect: true
-        \\  warn_todo: true
         \\  extra_banned_patterns: []
         \\zig:
         \\  warn_ptr_cast: true

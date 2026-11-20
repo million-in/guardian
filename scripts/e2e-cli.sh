@@ -25,7 +25,7 @@ grep -F "hidden_coupling" "$tmp_dir/design.pretty" >/dev/null
 jq -e '.file_count == 2 and .pass == true' "$tmp_dir/batch.json" >/dev/null
 
 ./zig-out/bin/gd analyze samples/rs_bad.rs --raw-json --config "$absolute_config" > "$tmp_dir/rust.json"
-jq -e '.language == "rust" and .warn_count > 0' "$tmp_dir/rust.json" >/dev/null
+jq -e '.language == "rust" and .warn_count > 0 and .error_count > 0 and .pass == false' "$tmp_dir/rust.json" >/dev/null
 
 ./zig-out/bin/gd folder src --json --config "$absolute_config" > "$tmp_dir/folder.json"
 jq -e '.file_count > 0 and .pass == true' "$tmp_dir/folder.json" >/dev/null

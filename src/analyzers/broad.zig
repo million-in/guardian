@@ -125,29 +125,21 @@ fn analyzeRust(
     cfg: guardian_config.Config,
     violations: *ViolationList,
 ) !void {
-    var in_loop = false;
     for (masked_lines, 0..) |line, line_idx| {
         const trimmed = std.mem.trim(u8, line, " \t");
         if (trimmed.len == 0) continue;
 
-        if (startsWithAny(trimmed, &.{ "for ", "while ", "loop " })) in_loop = true;
-
         if (cfg.audit.warn_ignored_errors and std.mem.startsWith(u8, trimmed, "let _ =")) {
             try append(violations, line_idx, .ignored_error, "ignored Result-like value should be handled or documented");
         }
-        if (cfg.audit.warn_panic_paths and containsAny(trimmed, &.{ "panic!(", "unreachable!(" })) {
-            try append(violations, line_idx, .panic_usage, "panic path should be justified and tested");
-        }
-        if (cfg.audit.warn_debug_output and containsAny(trimmed, &.{ "dbg!(", "println!(", "eprintln!(" })) {
+        // panic!/unreachable!/dbg! and clone are hard bans in the Rust
+        // type-safety pass (ban_dangerous_macros / ban_clone), not audit warns.
+        if (cfg.audit.warn_debug_output and containsAny(trimmed, &.{ "println!(", "eprintln!(" })) {
             try append(violations, line_idx, .debug_output, "debug output should not remain in production paths");
         }
         if (cfg.audit.warn_unpaired_resources and std.mem.indexOf(u8, trimmed, "std::mem::forget") != null) {
             try append(violations, line_idx, .unpaired_resource, "mem::forget bypasses normal drop cleanup");
         }
-        if (cfg.audit.warn_risky_conversions and in_loop and std.mem.indexOf(u8, trimmed, ".clone()") != null) {
-            try append(violations, line_idx, .risky_conversion, "clone inside a loop may be a hidden runtime cost");
-        }
-        if (in_loop and std.mem.indexOfScalar(u8, trimmed, '}') != null) in_loop = false;
     }
 }
 
