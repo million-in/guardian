@@ -2,6 +2,13 @@
 
 All notable changes to Guardian are documented here. Versions follow [Semantic Versioning](https://semver.org/); while Guardian is pre-1.0, breaking changes bump the minor version.
 
+## v0.4.0
+
+### Added
+
+- `gd mcp` — MCP server over stdio (newline-delimited JSON-RPC 2.0, protocol `2025-03-26`) exposing `guardian_analyze`, `guardian_analyze_source`, `guardian_batch`, `guardian_folder`, and `guardian_audit`. Register with Muse: `muse mcp add guardian -- gd mcp`. The MCP audit tool is static-only and never runs proof commands.
+- Wiki documentation: MCP guide for Muse.
+
 ## v0.3.0
 
 Rust rule expansion and hard bans ([PR #2](https://github.com/million-in/guardian/pull/2)).

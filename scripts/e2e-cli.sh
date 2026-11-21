@@ -50,3 +50,13 @@ grep -F "remove console logging before submission" "$tmp_dir/config-hit.pretty" 
 
 ./zig-out/bin/gd folder "$tmp_dir/config-hit" --raw-json > "$tmp_dir/config-hit.json"
 grep -F "remove console logging before submission" "$tmp_dir/config-hit.json" >/dev/null
+
+# MCP server (gd mcp): initialize, tools/list, tools/call over stdio
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"guardian_analyze","arguments":{"path":"samples/rs_bad.rs"}}}' \
+  | ./zig-out/bin/gd mcp > "$tmp_dir/mcp.jsonl"
+jq -e -s '.[0].result.serverInfo.name == "guardian" and (.[1].result.tools | length) == 5' "$tmp_dir/mcp.jsonl" >/dev/null
+jq -e -s '.[2].result.content[0].text | fromjson | .pass == false' "$tmp_dir/mcp.jsonl" >/dev/null

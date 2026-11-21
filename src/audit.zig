@@ -377,7 +377,7 @@ test "audit scoring caps category penalties" {
         .warn_count = 20,
     };
     const batch = app.BatchResult{
-        .results = &[_]analyzer.AnalysisResult{result},
+        .results = @constCast(&[_]analyzer.AnalysisResult{result}),
         .file_count = 1,
         .error_count = 0,
         .warn_count = 20,

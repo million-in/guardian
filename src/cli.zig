@@ -4,6 +4,7 @@ const app = @import("app.zig");
 const audit = @import("audit.zig");
 const compat = @import("compat.zig");
 const guardian_config = @import("config.zig");
+const mcp = @import("mcp.zig");
 
 const CliOptions = struct {
     json_output: bool = false,
@@ -19,6 +20,7 @@ const Command = enum {
     audit,
     batch,
     folder,
+    mcp,
     help,
 };
 
@@ -41,6 +43,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
 
     switch (command) {
         .help => return writeUsage(&stdout.interface),
+        .mcp => return mcp.run(allocator),
         .analyze, .audit, .batch, .folder => {},
     }
 
@@ -54,7 +57,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
         .audit => try runAuditCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .batch => try runBatchCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
         .folder => try runFolderCommand(allocator, &stdout.interface, &stderr.interface, parsed, output_mode),
-        .help => unreachable,
+        .help, .mcp => unreachable,
     }
 }
 
@@ -94,6 +97,7 @@ fn writeUsage(writer: anytype) !void {
         \\  gd audit <dir> [--run-proofs] [--proof-report path] [--score-threshold n] [--json] [--raw-json] [--config path]
         \\  gd batch <file> <file> [...] [--json] [--raw-json] [--config path]
         \\  gd folder <dir> [--json] [--raw-json] [--config path]
+        \\  gd mcp  # MCP server over stdio (JSON-RPC, newline-delimited)
         \\
         \\Config:
         \\  Auto-loads `guardian.config.yaml` from the target path upward.
@@ -290,6 +294,7 @@ fn parseCommand(arg: []const u8) ?Command {
     if (std.mem.eql(u8, arg, "audit")) return .audit;
     if (std.mem.eql(u8, arg, "batch")) return .batch;
     if (std.mem.eql(u8, arg, "folder")) return .folder;
+    if (std.mem.eql(u8, arg, "mcp")) return .mcp;
     if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help")) return .help;
     return null;
 }

@@ -41,7 +41,21 @@ gd analyze <file> [--json] [--raw-json] [--config path]
 gd audit <dir> [--run-proofs] [--proof-report path] [--score-threshold n] [--json] [--raw-json] [--config path]
 gd batch <file> <file> [...] [--json] [--raw-json] [--config path]
 gd folder <dir> [--json] [--raw-json] [--config path]
+gd mcp
 ```
+
+## MCP Server (Muse)
+
+`gd mcp` speaks the Model Context Protocol over stdio: newline-delimited JSON-RPC 2.0, protocol `2025-03-26`. Tools: `guardian_analyze`, `guardian_analyze_source`, `guardian_batch`, `guardian_folder`, `guardian_audit` (static only; MCP never runs proof commands). Each tool returns the same JSON report as the CLI as a text content block.
+
+Register it with Muse (stdio servers are added with `muse mcp add <name> -- <command> [args]...`; `--project` writes `.mcp.json` instead of user settings):
+
+```sh
+muse mcp add guardian -- /path/to/gd mcp
+muse mcp list
+```
+
+Or with the release archive on your `PATH`: `muse mcp add guardian -- gd mcp`. Full guide: [MCP wiki page](https://github.com/million-in/guardian/wiki/MCP).
 
 Examples:
 
@@ -264,7 +278,7 @@ bash ./scripts/package-release.sh
 
 Release archives contain `bin/gd`, `lib/libguardian.*`, `include/guardian.h`, `guardian.config.yaml`, `README.md`, `CHANGELOG.md`, `SPEC.md`, `DELTA.md`, and `LICENSE`.
 
-Guardian does not ship MCP servers, plugins, or skills. Use it through `gd` or the ABI.
+Guardian ships an MCP server as `gd mcp` (see below); it does not ship Muse plugins or skills.
 
 ## Project Structure
 
