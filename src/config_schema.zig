@@ -278,6 +278,13 @@ pub const Config = struct {
     }
 
     pub fn isIgnoredDir(self: Config, name: []const u8) bool {
+        // Always skip hidden dirs (.git, .cache, .venv, .venv-*, ...) and
+        // well-known generated/dependency dirs, even if config omits them.
+        if (name.len > 1 and name[0] == '.') return true;
+        const builtin = [_][]const u8{ "__pycache__", "node_modules", "venv", "env", "target", "vendor", "dist", "build", "zig-out", ".zig-cache" };
+        for (builtin) |dir_name| {
+            if (std.mem.eql(u8, name, dir_name)) return true;
+        }
         for (self.scan.ignored_dirs) |dir_name| {
             if (std.mem.eql(u8, name, dir_name)) {
                 return true;

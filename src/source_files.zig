@@ -118,6 +118,23 @@ test "source files: missing folder path is a folder error" {
     );
 }
 
+test "source files: hidden and cache dirs are skipped" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    inline for (.{ ".venv/lib", ".cache/x", "__pycache__", "src" }) |d| try compat.dirMakePath(tmp.dir, d);
+    inline for (.{ ".venv/lib/bad.py", ".cache/x/bad.py", "__pycache__/bad.py", "src/good.py" }) |p| {
+        try compat.dirWriteFile(tmp.dir, p, "x = 1\n");
+    }
+    var loaded = try test_config.loadDefault(testing.allocator);
+    defer loaded.deinit();
+    const root_path = try compat.dirRealpathAlloc(tmp.dir, testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const paths = try collectSourceFiles(testing.allocator, root_path, loaded.value);
+    defer freeOwnedStrings(testing.allocator, paths);
+    try testing.expectEqual(@as(usize, 1), paths.len);
+    try testing.expect(std.mem.endsWith(u8, paths[0], "src/good.py"));
+}
+
 test "source files: relative folder paths resolve before recursion" {
     var loaded = try test_config.loadDefault(testing.allocator);
     defer loaded.deinit();

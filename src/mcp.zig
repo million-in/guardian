@@ -135,7 +135,7 @@ fn route(rt: Route) !?[]u8 {
     const obj = rt.obj;
     const method = rt.method;
     if (std.mem.eql(u8, method, "initialize")) {
-        return try r.result("{\"protocolVersion\":\"" ++ version ++ "\",\"capabilities\":{\"tools\":{}},\"serverInfo\":" ++ "{\"name\":\"guardian\",\"version\":\"0.4.0\"}}");
+        return try r.result("{\"protocolVersion\":\"" ++ version ++ "\",\"capabilities\":{\"tools\":{}},\"serverInfo\":" ++ "{\"name\":\"guardian\",\"version\":\"0.4.1\"}}");
     }
     if (std.mem.eql(u8, method, "ping")) return try r.result("{}");
     if (std.mem.eql(u8, method, "tools/list")) {
@@ -165,6 +165,13 @@ fn handleCall(allocator: std.mem.Allocator, r: Responder, obj: std.json.ObjectMa
         return try r.tool(msg, true);
     };
     defer allocator.free(json);
+    // Never emit a line approaching the client's 16 MiB stdio cap: that
+    // kills the connection for every later call. Fail this call only.
+    if (json.len > 4 * 1024 * 1024) {
+        const msg = try std.fmt.allocPrint(allocator, "guardian error: result too large ({d} bytes); audit a smaller directory or fewer files", .{json.len});
+        defer allocator.free(msg);
+        return try r.tool(msg, true);
+    }
     return try r.tool(json, false);
 }
 

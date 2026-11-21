@@ -2,6 +2,13 @@
 
 All notable changes to Guardian are documented here. Versions follow [Semantic Versioning](https://semver.org/); while Guardian is pre-1.0, breaking changes bump the minor version.
 
+## v0.4.1
+
+### Fixed
+
+- Folder/audit scans now always skip hidden directories (`.cache`, `.venv*`, `.git`, ...) and `__pycache__`/`node_modules`/`venv`/`dist`/`build`/`target`/`vendor`, even when the target workspace has no Guardian config listing them. Previously the default ignored only `.git`, so `guardian_audit`/`guardian_folder` via MCP scanned virtualenvs and caches, produced a >16 MiB stdio line, and the client closed the MCP connection for all later calls ([issue #3](https://github.com/million-in/guardian/issues/3)).
+- MCP tool calls whose result would exceed 4 MiB now fail that single call with a recoverable error instead of emitting an oversized line that kills the connection.
+
 ## v0.4.0
 
 ### Added
