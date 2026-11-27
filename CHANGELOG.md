@@ -2,6 +2,12 @@
 
 All notable changes to Guardian are documented here. Versions follow [Semantic Versioning](https://semver.org/); while Guardian is pre-1.0, breaking changes bump the minor version.
 
+## v0.5.1
+
+### Fixed
+
+- Add parentheses to a mixed `and`/`or` expression in `reportLooksFailed` so Guardian builds on Zig master (0.18-dev); behavior is unchanged.
+
 ## v0.5.0
 
 ### Changed

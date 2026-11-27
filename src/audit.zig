@@ -336,8 +336,8 @@ fn resolveConfigPath(allocator: std.mem.Allocator, root_path: []const u8, path: 
 }
 
 fn reportLooksFailed(contents: []const u8) bool {
-    return std.mem.indexOf(u8, contents, "failures=\"0\"") == null and std.mem.indexOf(u8, contents, "<failure") != null or
-        std.mem.indexOf(u8, contents, "errors=\"0\"") == null and std.mem.indexOf(u8, contents, "<error") != null or
+    return (std.mem.indexOf(u8, contents, "failures=\"0\"") == null and std.mem.indexOf(u8, contents, "<failure") != null) or
+        (std.mem.indexOf(u8, contents, "errors=\"0\"") == null and std.mem.indexOf(u8, contents, "<error") != null) or
         std.mem.indexOf(u8, contents, "DA:0,0") != null or
         std.mem.indexOf(u8, contents, "\"failed\":true") != null;
 }
