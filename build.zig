@@ -60,7 +60,7 @@ pub fn build(b: *std.Build) void {
 
     const fmt = b.addFmt(.{
         .check = true,
-        .paths = &.{ "build.zig", "build.zig.zon", "src" },
+        .paths = &.{ b.path("build.zig"), b.path("build.zig.zon"), b.path("src") },
     });
     const fmt_step = b.step("fmt", "Check Zig formatting");
     fmt_step.dependOn(&fmt.step);

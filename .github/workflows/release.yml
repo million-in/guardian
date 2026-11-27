@@ -43,17 +43,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
         with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+          version: 0.17.1
+
+      - name: Install jq
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y jq
 
       - name: Run verification suite
-        run: nix develop -c zig build ci
+        run: zig build ci
 
       - name: Build release binaries
-        run: nix develop -c zig build -Doptimize=ReleaseFast
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Package release archive
         run: bash ./scripts/package-release.sh

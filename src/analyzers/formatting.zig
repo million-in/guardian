@@ -20,7 +20,7 @@ pub fn analyzeFormatting(
     var space_lines: u32 = 0;
     var trailing_ws_count: u32 = 0;
     var first_trailing_ws: u32 = 0;
-    var indent_widths = [_]u32{0} ** 16; // histogram of indent widths
+    var indent_widths: [16]u32 = @splat(0); // histogram of indent widths
 
     for (lines, 0..) |line, line_idx| {
         if (line.len == 0) continue;

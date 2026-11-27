@@ -2,6 +2,13 @@
 
 All notable changes to Guardian are documented here. Versions follow [Semantic Versioning](https://semver.org/); while Guardian is pre-1.0, breaking changes bump the minor version.
 
+## v0.5.0
+
+### Changed
+
+- Port to Zig 0.17: `minimum_zig_version` is now `0.17.0`. Fixes the build break on Zig 0.17 (`addFmt` paths as `LazyPath`, `dupeSentinel` replacing `dupeZ`, `std.meta.fieldNames` replacing `Type.Enum.fields`, array repeat init, `@backingInt`).
+- CI and release workflows pin Zig 0.17.1 via setup-zig (Nix removed from workflows); CI adds a non-blocking Zig-master canary job.
+
 ## v0.4.1
 
 ### Fixed

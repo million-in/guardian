@@ -16,7 +16,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     while (args_iter.next()) |arg| {
-        try args.append(try allocator.dupeZ(u8, arg));
+        try args.append(try allocator.dupeSentinel(u8, arg, 0));
     }
 
     cli.run(allocator, args.items[1..]) catch |err| {

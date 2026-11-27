@@ -11,7 +11,7 @@ Full documentation is in the [project wiki](https://github.com/million-in/guardi
 
 ## Requirements
 
-- Zig `>= 0.16.0`
+- Zig `>= 0.17.0`
 - `jq` for shell end-to-end tests
 
 ## Build

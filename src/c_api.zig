@@ -89,7 +89,7 @@ fn optionalSpan(value: ?[*:0]const u8) ?[]const u8 {
 }
 
 fn ownedCString(json: []const u8) ?[*:0]u8 {
-    const copied = std.heap.c_allocator.dupeZ(u8, json) catch return null;
+    const copied = std.heap.c_allocator.dupeSentinel(u8, json, 0) catch return null;
     return copied.ptr;
 }
 

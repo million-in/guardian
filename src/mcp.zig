@@ -135,7 +135,7 @@ fn route(rt: Route) !?[]u8 {
     const obj = rt.obj;
     const method = rt.method;
     if (std.mem.eql(u8, method, "initialize")) {
-        return try r.result("{\"protocolVersion\":\"" ++ version ++ "\",\"capabilities\":{\"tools\":{}},\"serverInfo\":" ++ "{\"name\":\"guardian\",\"version\":\"0.4.1\"}}");
+        return try r.result("{\"protocolVersion\":\"" ++ version ++ "\",\"capabilities\":{\"tools\":{}},\"serverInfo\":" ++ "{\"name\":\"guardian\",\"version\":\"0.5.0\"}}");
     }
     if (std.mem.eql(u8, method, "ping")) return try r.result("{}");
     if (std.mem.eql(u8, method, "tools/list")) {

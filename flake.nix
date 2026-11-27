@@ -16,7 +16,7 @@
           packages = with pkgs; [
             bash
             jq
-            zig_0_16
+            zig_0_17
           ];
         };
       });

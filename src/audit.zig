@@ -73,7 +73,7 @@ pub const AuditResult = struct {
     }
 };
 
-const category_count = @typeInfo(types.RuleCategory).@"enum".fields.len;
+const category_count = std.meta.fieldNames(types.RuleCategory).len;
 const category_penalty_cap = 25;
 
 pub fn analyzeFolderAudit(
@@ -231,7 +231,7 @@ fn initialCategories() [category_count]CategorySummary {
 }
 
 fn categoryIndex(category: types.RuleCategory) usize {
-    return @intFromEnum(category);
+    return @backingInt(category);
 }
 
 fn collectProofEvidence(

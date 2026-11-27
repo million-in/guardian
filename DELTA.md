@@ -2,7 +2,7 @@
 
 ## Conventions
 
-- Keep Guardian dependency-light Zig 0.16 code; prefer explicit small helpers over broad parser rewrites.
+- Keep Guardian dependency-light Zig 0.17 code; prefer explicit small helpers over broad parser rewrites.
 - Add language support by extending `types.Language`, config schema/defaults, source masking, targeted analyzers, symbol model, samples, and tests together.
 - Preserve line/column stability when masking comments and strings.
 - Keep release/package contents aligned with supported surfaces: `gd`, C ABI library, header, config, docs, license.
